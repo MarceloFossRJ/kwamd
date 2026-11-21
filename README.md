@@ -28,9 +28,20 @@ not supported yet. Images are not extracted.
 
 ## Development
 
+Every clone needs the git hooks installed once:
+
 ```sh
-uv run pytest
+uv run pre-commit install
+```
+
+The hook blocks commits to `main` and runs the same checks as CI. To run them on demand:
+
+```sh
+uv run pre-commit run --all-files   # everything below, in one go
+uv run ruff check
+uv run ruff format --check
 uv run mypy
+uv run pytest
 ```
 
 ## License
