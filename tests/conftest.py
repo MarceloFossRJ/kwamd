@@ -76,3 +76,12 @@ def make_source() -> MakeSource:
         return path
 
     return _make
+
+
+def stderr_lines(err: str, tmp_path: Path) -> list[str]:
+    """Split captured stderr into lines, with ``tmp_path`` shown as ``<tmp>``.
+
+    pytest names ``tmp_path`` after the test, so without this a check like
+    ``"scanned" in line`` would also match a test whose name says "scanned".
+    """
+    return err.replace(str(tmp_path), "<tmp>").splitlines()
