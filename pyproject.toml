@@ -1,0 +1,43 @@
+[project]
+name = "kwamd"
+version = "0.1.0"
+description = "A command-line tool that converts a PDF document into a Markdown file."
+readme = "README.md"
+license = "AGPL-3.0-or-later"
+license-files = ["LICENSE"]
+authors = [
+    { name = "Marcelo Foss de Oliveira", email = "marcelo.foss.rj@gmail.com" }
+]
+requires-python = ">=3.14"
+dependencies = [
+    "pymupdf4llm>=2.1",
+]
+
+[project.scripts]
+kwamd = "kwamd:main"
+
+[build-system]
+requires = ["uv_build>=0.13.9,<0.14.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "mypy>=2.4.1",
+    "pytest>=9.2.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = [
+    "ignore:builtin type .* has no __module__ attribute:DeprecationWarning",
+]
+
+[tool.mypy]
+strict = true
+files = ["src", "tests"]
+# PyMuPDF ships py.typed but leaves most functions unannotated.
+untyped_calls_exclude = ["pymupdf"]
+
+[[tool.mypy.overrides]]
+module = ["pymupdf4llm", "pymupdf4llm.*"]
+ignore_missing_imports = true

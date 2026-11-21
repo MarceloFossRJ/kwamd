@@ -1,2 +1,34 @@
 # kwamd
-A cli to tool that converts pdf files to markdown.
+
+A command-line tool that converts a PDF document into a Markdown file, using
+[PyMuPDF4LLM](https://github.com/pymupdf/pymupdf4llm).
+
+## Usage
+
+```sh
+kwamd <source> [target]
+```
+
+- `kwamd report.pdf` writes `report.md` in the **current folder**.
+- `kwamd report.pdf notes.md` writes `notes.md` (the path is used exactly as given).
+- `kwamd report.pdf some/folder/` writes `some/folder/report.md`.
+
+kwamd never overwrites a file: if the Target exists, it writes `report (1).md`,
+`report (2).md`, … using the lowest free number. On success it prints the path
+it wrote to stdout; warnings and errors go to stderr.
+
+Exit codes: `0` success, `1` Source or Target problem, `2` wrong usage.
+
+A Scanned Source (pages that are only images) is converted with a warning; OCR is
+not supported yet. Images are not extracted.
+
+## Development
+
+```sh
+uv run pytest
+uv run mypy
+```
+
+## License
+
+AGPL-3.0-or-later. See [LICENSE](LICENSE).

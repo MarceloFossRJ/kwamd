@@ -1,0 +1,60 @@
+"""The ``kwamd`` command: argument parsing, orchestration and exit codes.
+
+Exit codes: 0 success, 1 Source or Target failure, 2 usage error (argparse).
+This is the only module that prints.
+"""
+
+import argparse
+import sys
+from collections.abc import Sequence
+from importlib.metadata import version
+from pathlib import Path
+
+from kwamd.conversion import convert
+from kwamd.errors import KwamdError
+from kwamd.source import check_source
+from kwamd.target import resolve_target, write_target
+
+
+def _parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="kwamd",
+        description="Convert a PDF document into a Markdown file.",
+        allow_abbrev=False,
+    )
+    parser.add_argument("source", type=Path, help="the PDF to convert")
+    parser.add_argument(
+        "target",
+        nargs="?",
+        help="where to write the Markdown (default: <source name>.md in the current folder)",
+    )
+    parser.add_argument("--version", action="version", version=f"%(prog)s {version('kwamd')}")
+    return parser
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    try:
+        args = _parser().parse_args(argv)
+    except SystemExit as stop:
+        # argparse exits on --help/--version (0) and on usage errors (2).
+        return stop.code if isinstance(stop.code, int) else 2
+    try:
+        target = _run(args.source, args.target)
+    except KwamdError as error:
+        print(f"kwamd: error: {error}", file=sys.stderr)
+        return 1
+    print(target)
+    return 0
+
+
+def _run(source: Path, requested: str | None) -> Path:
+    checked = check_source(source)
+    target = resolve_target(source, requested, Path.cwd())
+    write_target(target, convert(source))
+    if checked.scanned:
+        print(
+            f"kwamd: warning: Source looks scanned (most pages have no text): {source}; "
+            "OCR is not supported yet, so the Target may be nearly empty",
+            file=sys.stderr,
+        )
+    return target
