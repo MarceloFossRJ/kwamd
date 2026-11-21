@@ -14,7 +14,8 @@ A command-line tool, `kwamd`, invoked as `kwamd <source> [target]`.
 - When the Target is omitted, it is written to the current folder, named after the Source's stem with a `.md` extension.
 - kwamd never overwrites an existing file. If the intended Target exists, it writes `<stem> (n)<ext>` using the lowest free `n`, the way browsers name repeated downloads.
 - On success it prints exactly one line to stdout: the path of the Target it actually wrote.
-- It warns (but still succeeds) when the Source looks like a **Scanned Source**, and fails with a clear one-line message when the Source is missing, not a PDF, encrypted, or has no pages.
+- It warns (but still succeeds) when the Source looks like a **Scanned Source**, and fails with a clear one-line message when the Source is missing, a folder, unreadable, not a PDF, or has no pages.
+- For a password-protected Source, it asks the person for the password at the terminal (hidden input, up to three attempts) and converts it with the right one. Without a terminal to ask, it fails with a one-line message.
 
 ## User Stories
 
@@ -60,7 +61,7 @@ A command-line tool, `kwamd`, invoked as `kwamd <source> [target]`.
 - **Argument parsing.** Standard-library `argparse`. Two positionals (`source`, optional `target`), plus `--help` and `--version`. No other flags in v1 (notably no overwrite/force flag).
 - **Modules.**
   - *CLI*: parses arguments, orchestrates, maps outcomes to stdout/stderr and exit codes. The only module that prints or knows about exit codes.
-  - *Source checking*: opens the Source and classifies it: missing, not a PDF, encrypted, zero pages, Scanned Source, or OK. Classification is by content, never by extension.
+  - *Source checking*: opens the Source, unlocking it with a password from the CLI when it is password-protected, and classifies it: missing, a folder, unreadable, not a PDF, wrong password, zero pages, Scanned Source, or OK. Classification is by content, never by extension.
   - *Target resolution*: given the Source and the optional target argument (and the current folder), produces the final Target path, including folder handling and browser-style numbering.
   - *Conversion*: a small interface along the lines of "Source path in, Markdown text out", implemented with PyMuPDF4LLM. Images are not extracted; no page separators.
 - **Target resolution rules.**
