@@ -15,7 +15,11 @@ kwamd <source> [target]
 
 kwamd never overwrites a file: if the Target exists, it writes `report (1).md`,
 `report (2).md`, … using the lowest free number. On success it prints the path
-it wrote to stdout; warnings and errors go to stderr.
+it wrote to stdout, as an absolute path; warnings and errors go to stderr.
+Relative paths are read against the current folder.
+
+For a password-protected PDF, kwamd asks for the password at the terminal
+(hidden input, three attempts). Without a terminal it fails.
 
 Exit codes: `0` success, `1` Source or Target problem, `2` wrong usage.
 

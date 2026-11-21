@@ -29,7 +29,7 @@ A command-line tool, `kwamd`, invoked as `kwamd <source> [target]`.
 9. As a user, I want numbering to pick the lowest free number, so that if `report (1).md` was deleted, the next conversion reuses `(1)`.
 10. As a user, I want the same numbering rule to apply to explicit Targets and folder Targets as to the default Target, so that there is one rule to remember.
 11. As a user, I want a colliding extension-less Target such as `notes` to become `notes (1)`, so that numbering works for any name.
-12. As a user, I want kwamd to print the final Target path on stdout, so that I know where the file went even when it was renumbered.
+12. As a user, I want kwamd to print the final Target path on stdout, always as an absolute path, so that I know where the file went even when it was renumbered. Relative Source and Target paths are read against the current folder.
 13. As a script author, I want stdout to contain only the Target path, so that I can capture it with `$(kwamd file.pdf)` and use it in the next command.
 14. As a script author, I want warnings and errors on stderr, so that they don't pollute captured stdout.
 15. As a script author, I want exit code `0` on success, so that I can chain kwamd with `&&`.
@@ -38,7 +38,7 @@ A command-line tool, `kwamd`, invoked as `kwamd <source> [target]`.
 18. As a user, I want a clear error when the Source does not exist, so that I can fix the path.
 19. As a user, I want a clear error when the Source is not actually a PDF (e.g. a renamed `.docx`), so that I am not handed garbage Markdown.
 20. As a user, I want a real PDF without a `.pdf` extension to be accepted, so that oddly named downloads still convert; its default Target is `<name>.md`.
-21. As a user, I want a clear error when the Source is password-protected, so that I understand why it cannot be converted.
+21. As a user who has the password of a password-protected Source, I want kwamd to ask me for it with hidden input (up to three attempts, like `sudo`), so that I can convert it without the password landing in shell history; without a terminal to ask, I want a clear error instead. A Source with only an owner password (it opens without one) converts without asking.
 22. As a user, I want a clear error when the Source has zero pages, so that I am not given an empty Target.
 23. As a user, I want a warning when the Source looks like a Scanned Source (fewer than half its pages have extractable text), so that I understand why the Markdown is nearly empty.
 24. As a user, I want the Target still to be written for a Scanned Source, so that I keep whatever text was extracted.
@@ -70,9 +70,11 @@ A command-line tool, `kwamd`, invoked as `kwamd <source> [target]`.
   - Parent folder of the Target missing → error (exit 1); folders are never created.
   - If the resolved path exists → `<stem> (<n>)<ext>` with a single space before the parenthesis, `n` starting at 1, choosing the lowest `n` that does not exist. Applies to every kind of Target.
 - **Scanned Source rule.** A Source is a Scanned Source when fewer than half of its pages have any extractable text (judged with PyMuPDF's page text before conversion). It is converted and written anyway, with a one-line warning on stderr; exit 0.
-- **Source failures.** Missing file, not a PDF, encrypted (no password prompt), zero pages: each yields a distinct one-line stderr message and exit 1. Nothing is written.
+- **Source failures.** Missing file, a folder, unreadable, not a PDF, zero pages: each yields a distinct one-line stderr message and exit 1. Nothing is written.
+- **Password-protected Source** (one that cannot be opened without a password). If stdin is a terminal, kwamd prompts `Password for <name>: ` with hidden input. On a wrong password it prints `kwamd: wrong password, try again` to stderr and asks again, up to three attempts in total. After the third wrong password it fails with exit 1. With no terminal it fails at once with exit 1. There is no password flag or environment variable. A Source encrypted with only an owner password opens without one and converts without asking.
 - **Target write failure** (e.g. permission denied) → one-line stderr message, exit 1.
-- **Output contract.** Success: stdout is exactly one line, the final Target path. Warnings and errors only on stderr. Exit codes: 0 success (including the Scanned Source warning), 1 Source/Target failure, 2 usage error.
+- **Paths.** Relative Source and Target arguments are read against the current folder. The Target path is normalised (`sub/../notes.md` → `notes.md`) and printed as an absolute path.
+- **Output contract.** Success: stdout is exactly one line, the final Target path (absolute). Warnings and errors only on stderr. Exit codes: 0 success (including the Scanned Source warning), 1 Source/Target failure, 2 usage error.
 - **Encoding.** Target written as UTF-8.
 - **Packaging.** Add `pymupdf4llm` as the sole runtime dependency. Declare `license = "AGPL-3.0-or-later"` and `license-files = ["LICENSE"]` in the project metadata. Fill in the project description.
 
@@ -80,9 +82,10 @@ A command-line tool, `kwamd`, invoked as `kwamd <source> [target]`.
 
 - **One seam: the CLI entry function.** Every test calls `main(argv)` in-process, with the working folder set to a temporary directory, and asserts only on externally visible behaviour: the returned exit code, captured stdout and stderr, and the files present on disk (names and Markdown content). Internal modules (source checking, target resolution, conversion) are not tested directly, so they can be refactored freely.
 - **No mocking of PyMuPDF4LLM.** Tests run the real conversion so that they exercise what users get.
-- **Fixture PDFs are generated in the tests with PyMuPDF**: a text PDF with headings, a multi-page PDF, an image-only PDF (Scanned Source), a mostly-text PDF with one image-only page (no warning), an encrypted PDF, a zero-page PDF where PyMuPDF allows one, and a non-PDF file with a `.pdf` extension. Commit a real-world PDF only if a future bug requires one.
+- **Fixture PDFs are generated in the tests with PyMuPDF**: a text PDF with headings, a multi-page PDF, an image-only PDF (Scanned Source), a mostly-text PDF with one image-only page (no warning), password-protected and owner-password-only PDFs, a zero-page PDF where PyMuPDF allows one, and a non-PDF file with a `.pdf` extension. Commit a real-world PDF only if a future bug requires one.
 - **Content assertions are tolerant**: assert that key text and heading markers appear, not byte-exact Markdown, so that PyMuPDF4LLM upgrades don't break tests needlessly.
 - **What a good test looks like**: named after a user-visible behaviour (e.g. "colliding target gets lowest free number"), sets up files, runs `main` with the words a user would type, and checks exit code, streams and files.
+- **The terminal is the one faked boundary**: password tests replace `sys.stdin.isatty` and `getpass.getpass` to stand in for the person typing. They still go through `main(argv)`.
 - **Prior art**: none yet; the codebase is a skeleton. These tests establish the pattern. Use pytest (`tmp_path`, `monkeypatch.chdir`, `capsys`).
 
 ## Out of Scope
@@ -94,7 +97,7 @@ A command-line tool, `kwamd`, invoked as `kwamd <source> [target]`.
 - Page ranges or page separators.
 - Configuration files.
 - Overwriting an existing Target (no `--force`).
-- Password-protected PDFs (no password prompt or flag).
+- Supplying a password non-interactively (no `--password` flag, no environment variable).
 - Creating missing parent folders for the Target.
 
 ## Further Notes

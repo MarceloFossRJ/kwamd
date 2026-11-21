@@ -6,17 +6,21 @@ swapped or augmented (e.g. with OCR) without touching the CLI.
 
 from pathlib import Path
 
+import pymupdf
 import pymupdf4llm
 
 
-def convert(source: Path) -> str:
+def convert(source: Path, password: str | None = None) -> str:
     """Return the Markdown for the whole Source as one continuous document."""
-    markdown: str = pymupdf4llm.to_markdown(
-        str(source),
-        write_images=False,
-        embed_images=False,
-        page_separators=False,
-        use_ocr=False,
-        show_progress=False,
-    )
+    with pymupdf.open(source) as doc:
+        if password is not None:
+            doc.authenticate(password)
+        markdown: str = pymupdf4llm.to_markdown(
+            doc,
+            write_images=False,
+            embed_images=False,
+            page_separators=False,
+            use_ocr=False,
+            show_progress=False,
+        )
     return markdown

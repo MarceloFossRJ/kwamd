@@ -1,5 +1,7 @@
 """Behaviour of the ``kwamd`` command, tested through ``main(argv)``."""
 
+import getpass
+import sys
 from pathlib import Path
 
 import pytest
@@ -172,15 +174,99 @@ def test_real_pdf_without_pdf_extension_is_accepted(workdir: Path, make_pdf: Mak
     assert "Hello world" in (workdir / "download.md").read_text(encoding="utf-8")
 
 
-def test_encrypted_source_fails(
-    workdir: Path, make_pdf: MakePdf, capsys: pytest.CaptureFixture[str]
+class FakeTerminal:
+    """Stands in for the person at the terminal: answers password prompts in order."""
+
+    def __init__(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self.answers: list[str] = []
+        self.prompts: list[str] = []
+        monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+        monkeypatch.setattr(getpass, "getpass", self._getpass)
+
+    def _getpass(self, prompt: str = "Password: ", stream: object = None) -> str:
+        self.prompts.append(prompt)
+        return self.answers.pop(0)
+
+
+@pytest.fixture
+def terminal(monkeypatch: pytest.MonkeyPatch) -> FakeTerminal:
+    return FakeTerminal(monkeypatch)
+
+
+def test_password_protected_source_converts_with_the_password_typed_at_the_prompt(
+    workdir: Path, make_pdf: MakePdf, terminal: FakeTerminal, capsys: pytest.CaptureFixture[str]
 ) -> None:
     source = make_pdf(workdir / "secret.pdf", ["Hello world"], password="hunter2")
+    terminal.answers = ["hunter2"]
+
+    exit_code = main([str(source)])
+
+    assert exit_code == 0
+    assert terminal.prompts == ["Password for secret.pdf: "]
+    assert "Hello world" in (workdir / "secret.md").read_text(encoding="utf-8")
+    assert capsys.readouterr().out == f"{workdir / 'secret.md'}\n"
+
+
+def test_wrong_password_is_asked_again(
+    workdir: Path, make_pdf: MakePdf, terminal: FakeTerminal, capsys: pytest.CaptureFixture[str]
+) -> None:
+    source = make_pdf(workdir / "secret.pdf", ["Hello world"], password="hunter2")
+    terminal.answers = ["nope", "", "hunter2"]
+
+    exit_code = main([str(source)])
+
+    assert exit_code == 0
+    assert len(terminal.prompts) == 3
+    assert "Hello world" in (workdir / "secret.md").read_text(encoding="utf-8")
+    assert capsys.readouterr().err.count("try again") == 2
+
+
+def test_three_wrong_passwords_fail(
+    workdir: Path, make_pdf: MakePdf, terminal: FakeTerminal, capsys: pytest.CaptureFixture[str]
+) -> None:
+    source = make_pdf(workdir / "secret.pdf", ["Hello world"], password="hunter2")
+    terminal.answers = ["a", "b", "c", "hunter2"]
 
     exit_code = main([str(source)])
 
     assert exit_code == 1
-    _assert_failed_with_one_line(capsys, workdir, "password", "secret.pdf")
+    assert len(terminal.prompts) == 3
+    err = capsys.readouterr().err
+    assert err.splitlines()[-1].startswith("kwamd: error: Wrong password")
+    assert "secret.pdf" in err.splitlines()[-1]
+    assert not list(workdir.glob("*.md"))
+
+
+def test_password_protected_source_fails_without_a_terminal_to_ask(
+    workdir: Path,
+    make_pdf: MakePdf,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    source = make_pdf(workdir / "secret.pdf", ["Hello world"], password="hunter2")
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
+
+    def no_prompt(*args: object, **kwargs: object) -> str:
+        raise AssertionError("must not prompt without a terminal")
+
+    monkeypatch.setattr(getpass, "getpass", no_prompt)
+
+    exit_code = main([str(source)])
+
+    assert exit_code == 1
+    _assert_failed_with_one_line(capsys, workdir, "password-protected", "terminal", "secret.pdf")
+
+
+def test_source_with_only_an_owner_password_converts_without_asking(
+    workdir: Path, make_pdf: MakePdf, terminal: FakeTerminal
+) -> None:
+    source = make_pdf(workdir / "locked.pdf", ["Hello world"], owner_password="owner")
+
+    exit_code = main([str(source)])
+
+    assert exit_code == 0
+    assert terminal.prompts == []
+    assert "Hello world" in (workdir / "locked.md").read_text(encoding="utf-8")
 
 
 # PyMuPDF refuses to save a document with zero pages, so write one by hand.
@@ -343,7 +429,10 @@ def test_scanned_source_warning_is_not_shown_when_the_conversion_fails(
     exit_code = main([str(source), "missing/scan.md"])
 
     assert exit_code == 1
-    assert "scanned" not in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "kwamd: warning:" not in err
+    assert err.startswith("kwamd: error:")
+    assert err.count("\n") == 1
 
 
 def test_folder_given_as_source_fails(workdir: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -367,3 +456,32 @@ def test_unreadable_source_fails(
 
     assert exit_code == 1
     _assert_failed_with_one_line(capsys, workdir, "Cannot read Source", "report.pdf")
+
+
+@pytest.mark.parametrize(
+    ("argv", "expected"),
+    [
+        (["report.pdf"], "report.md"),
+        (["report.pdf", "notes.md"], "notes.md"),
+        (["report.pdf", "sub/notes.md"], "sub/notes.md"),
+        (["report.pdf", "sub"], "sub/report.md"),
+        (["report.pdf", "sub/../notes.md"], "notes.md"),
+        (["./report.pdf", "./sub/"], "sub/report.md"),
+    ],
+)
+def test_relative_paths_are_read_against_current_folder_and_target_is_printed_absolute(
+    workdir: Path,
+    make_pdf: MakePdf,
+    capsys: pytest.CaptureFixture[str],
+    argv: list[str],
+    expected: str,
+) -> None:
+    make_pdf(workdir / "report.pdf", ["Hello world"])
+    (workdir / "sub").mkdir()
+
+    exit_code = main(argv)
+
+    assert exit_code == 0
+    target = workdir / expected
+    assert "Hello world" in target.read_text(encoding="utf-8")
+    assert capsys.readouterr().out == f"{target}\n"

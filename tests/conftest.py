@@ -1,7 +1,8 @@
 """Shared fixtures: build Source PDFs on the fly with PyMuPDF."""
 
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from pathlib import Path
+from typing import Protocol
 
 import pymupdf
 import pytest
@@ -9,7 +10,22 @@ import pytest
 type PageSpec = str | None
 """Text for one page; ``None`` means an image-only page with no text."""
 
-type MakePdf = Callable[..., Path]
+
+class MakePdf(Protocol):
+    """Build a PDF at ``path`` with one page per entry of ``pages``; return ``path``.
+
+    ``password`` is needed to open the PDF; ``owner_password`` alone encrypts it
+    but lets anyone open it.
+    """
+
+    def __call__(
+        self,
+        path: Path,
+        pages: Sequence[PageSpec] = ...,
+        *,
+        password: str | None = None,
+        owner_password: str | None = None,
+    ) -> Path: ...
 
 
 def _image_only_page(doc: pymupdf.Document) -> None:
@@ -38,6 +54,7 @@ def make_pdf() -> MakePdf:
         pages: Sequence[PageSpec] = ("Hello world",),
         *,
         password: str | None = None,
+        owner_password: str | None = None,
     ) -> Path:
         doc = pymupdf.open()
         for spec in pages:
@@ -45,14 +62,15 @@ def make_pdf() -> MakePdf:
                 _image_only_page(doc)
             else:
                 _text_page(doc, spec)
-        if password is None:
+        if password is None and owner_password is None:
             doc.save(path)
         else:
+            # ``password`` is needed to open it; ``owner_password`` only restricts editing.
             doc.save(
                 path,
                 encryption=pymupdf.PDF_ENCRYPT_AES_256,
-                owner_pw=password,
-                user_pw=password,
+                owner_pw=owner_password or password,
+                user_pw=password or "",
             )
         doc.close()
         return path

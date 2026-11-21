@@ -11,7 +11,8 @@ def resolve_target(source: Path, requested: str | None, cwd: Path) -> Path:
     """Return the path the Markdown should be written to.
 
     ``requested`` is the target argument exactly as typed, so that a trailing
-    separator (``out/``) still means "a folder".
+    separator (``out/``) still means "a folder". A relative ``requested`` is
+    read against ``cwd``; the returned path is always absolute and normalised.
 
     An existing file is never chosen: like a browser download, the first free
     ``<stem> (<n>)<suffix>`` is used instead, with the lowest ``n`` from 1.
@@ -19,13 +20,14 @@ def resolve_target(source: Path, requested: str | None, cwd: Path) -> Path:
     default_name = f"{source.stem}.md"
     if requested is None:
         wanted = cwd / default_name
-    elif requested.endswith(("/", os.sep)) or Path(requested).is_dir():
-        folder = Path(requested)
-        if not folder.is_dir():
-            raise KwamdError(f"Target folder does not exist: {folder}")
-        wanted = folder / default_name
     else:
-        wanted = Path(requested)
+        requested_path = Path(os.path.abspath(cwd / requested))
+        if requested.endswith(("/", os.sep)) or requested_path.is_dir():
+            if not requested_path.is_dir():
+                raise KwamdError(f"Target folder does not exist: {requested_path}")
+            wanted = requested_path / default_name
+        else:
+            wanted = requested_path
     if not wanted.parent.is_dir():
         raise KwamdError(f"Target folder does not exist: {wanted.parent}")
     return _first_free(wanted)

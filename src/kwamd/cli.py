@@ -5,14 +5,15 @@ This is the only module that prints.
 """
 
 import argparse
+import getpass
 import sys
 from collections.abc import Sequence
 from importlib.metadata import version
 from pathlib import Path
 
 from kwamd.conversion import convert
-from kwamd.errors import KwamdError
-from kwamd.source import check_source
+from kwamd.errors import KwamdError, PasswordRequired, WrongPassword
+from kwamd.source import CheckedSource, check_source
 from kwamd.target import resolve_target, write_target
 
 
@@ -47,10 +48,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     return 0
 
 
+PASSWORD_ATTEMPTS = 3
+
+
 def _run(source: Path, requested: str | None) -> Path:
-    checked = check_source(source)
+    try:
+        checked = check_source(source)
+    except PasswordRequired:
+        checked = _check_with_password_from_prompt(source)
     target = resolve_target(source, requested, Path.cwd())
-    write_target(target, convert(source))
+    write_target(target, convert(source, checked.password))
     if checked.scanned:
         print(
             f"kwamd: warning: Source looks scanned (most pages have no text): {source}; "
@@ -58,3 +65,23 @@ def _run(source: Path, requested: str | None) -> Path:
             file=sys.stderr,
         )
     return target
+
+
+def _check_with_password_from_prompt(source: Path) -> CheckedSource:
+    """Ask the person at the terminal for the Source's password, like sudo does."""
+    if not sys.stdin.isatty():
+        raise KwamdError(
+            f"Source is password-protected and there is no terminal to ask for it: {source}"
+        )
+    for attempt in range(1, PASSWORD_ATTEMPTS + 1):
+        try:
+            password = getpass.getpass(f"Password for {source.name}: ")
+        except EOFError:
+            raise KwamdError(f"No password given for Source: {source}") from None
+        try:
+            return check_source(source, password)
+        except WrongPassword:
+            if attempt == PASSWORD_ATTEMPTS:
+                raise
+            print("kwamd: wrong password, try again", file=sys.stderr)
+    raise AssertionError("unreachable")
