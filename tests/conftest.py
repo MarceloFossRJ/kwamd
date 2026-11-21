@@ -1,4 +1,4 @@
-"""Shared fixtures: build Source PDFs on the fly with PyMuPDF."""
+"""Shared fixtures: build Sources (and invalid ones) on the fly with PyMuPDF."""
 
 from collections.abc import Sequence
 from pathlib import Path
@@ -11,7 +11,7 @@ type PageSpec = str | None
 """Text for one page; ``None`` means an image-only page with no text."""
 
 
-class MakePdf(Protocol):
+class MakeSource(Protocol):
     """Build a PDF at ``path`` with one page per entry of ``pages``; return ``path``.
 
     ``password`` is needed to open the PDF; ``owner_password`` alone encrypts it
@@ -48,7 +48,7 @@ def _text_page(doc: pymupdf.Document, text: str) -> None:
 
 
 @pytest.fixture
-def make_pdf() -> MakePdf:
+def make_source() -> MakeSource:
     def _make(
         path: Path,
         pages: Sequence[PageSpec] = ("Hello world",),

@@ -69,21 +69,23 @@ A command-line tool, `kwamd`, invoked as `kwamd <source> [target]`.
   - Any other target argument → used exactly as given; no extension is added or changed.
   - An empty Source or target argument is a usage error (exit 2).
   - Parent folder of the Target missing → error (exit 1); folders are never created.
-  - If the resolved path exists → `<stem> (<n>)<ext>` with a single space before the parenthesis, `n` starting at 1, choosing the lowest `n` that does not exist. Applies to every kind of Target.
+  - Target argument ends with a path separator but names an existing file → error "Target is not a folder" (exit 1).
+  - If the resolved path exists (a dangling symlink counts as existing and is left alone) → `<stem> (<n>)<ext>` with a single space before the parenthesis, `n` starting at 1, choosing the lowest `n` that does not exist. Applies to every kind of Target.
 - **Scanned Source rule.** A Source is a Scanned Source when fewer than half of its pages have any extractable text (judged with PyMuPDF's page text before conversion). It is converted and written anyway, with a one-line warning on stderr; exit 0.
 - **Source failures.** Missing file, a folder, unreadable, not a PDF, zero pages: each yields a distinct one-line stderr message and exit 1. Nothing is written.
 - **Password-protected Source** (one that cannot be opened without a password). If stdin is a terminal, kwamd prompts `Password for <name>: ` with hidden input. On a wrong password it prints `kwamd: wrong password, try again` to stderr and asks again, up to three attempts in total. After the third wrong password it fails with exit 1. With no terminal it fails at once with exit 1. There is no password flag or environment variable. A Source encrypted with only an owner password opens without one and converts without asking.
 - **Target write failure** (e.g. permission denied, text that cannot be encoded as UTF-8) → one-line stderr message, exit 1, and no partial Target is left behind.
 - **Conversion failure** (PyMuPDF4LLM raises on a Source PyMuPDF could open) → one-line stderr message, exit 1, no Target written.
 - **Paths.** Relative Source and Target arguments are read against the current folder. The Target path is normalised (`sub/../notes.md` → `notes.md`) and printed as an absolute path.
-- **Stream contract.** Success: stdout is exactly one line, the final Target path (absolute). Warnings and errors only on stderr. Exit codes: 0 success (including the Scanned Source warning), 1 Source/Target failure, 2 usage error.
+- **Stream contract.** Success: stdout is exactly one line, the final Target path (absolute). Warnings and errors only on stderr. Exit codes: 0 success (including the Scanned Source warning), 1 Source/Target failure, 2 usage error, 130 interrupted with Ctrl-C (stderr: `kwamd: interrupted`, nothing written).
+- **Order of checks.** The Target is resolved and checked before the Source is opened, so a person is never asked for a password only to learn that the Target path is wrong.
 - **Encoding.** Target written as UTF-8.
 - **Packaging.** Add `pymupdf4llm` as the sole runtime dependency. Declare `license = "AGPL-3.0-or-later"` and `license-files = ["LICENSE"]` in the project metadata. Fill in the project description.
 
 ## Testing Decisions
 
 - **One seam: the CLI entry function.** Every test calls `main(argv)` in-process, with the working folder set to a temporary directory, and asserts only on externally visible behaviour: the returned exit code, captured stdout and stderr, and the files present on disk (names and Markdown content). Internal modules (source checking, target resolution, conversion) are not tested directly, so they can be refactored freely.
-- **No mocking of PyMuPDF4LLM.** Tests run the real conversion so that they exercise what users get.
+- **No mocking of PyMuPDF4LLM for behaviour.** Tests run the real conversion so that they exercise what users get. The one exception is the failure path: to prove that a PyMuPDF4LLM failure (or Markdown that cannot be encoded) is reported cleanly, those tests replace `pymupdf4llm.to_markdown` with a fake that raises or returns bad text, because the real library cannot be made to fail on demand.
 - **Fixture PDFs are generated in the tests with PyMuPDF**: a text PDF with headings, a multi-page PDF, a Scanned Source (only image pages), a mostly-text PDF with one image-only page (no warning), password-protected and owner-password-only PDFs, a zero-page PDF where PyMuPDF allows one, and a non-PDF file with a `.pdf` extension. Commit a real-world PDF only if a future bug requires one.
 - **Content assertions are tolerant**: assert that key text and heading markers appear, not byte-exact Markdown, so that PyMuPDF4LLM upgrades don't break tests needlessly.
 - **What a good test looks like**: named after a user-visible behaviour (e.g. "colliding target gets lowest free number"), sets up files, runs `main` with the words a user would type, and checks exit code, streams and files.

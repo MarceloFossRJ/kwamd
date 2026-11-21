@@ -21,7 +21,7 @@ Relative paths are read against the current folder.
 For a password-protected PDF, kwamd asks for the password at the terminal
 (hidden input, three attempts). Without a terminal it fails.
 
-Exit codes: `0` success, `1` Source or Target problem, `2` wrong usage.
+Exit codes: `0` success, `1` Source or Target problem, `2` wrong usage, `130` interrupted (Ctrl-C).
 
 A Scanned Source (pages that are only images) is converted with a warning; OCR is
 not supported yet. Images are not extracted.

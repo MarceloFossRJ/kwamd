@@ -9,7 +9,7 @@ import pytest
 
 from kwamd import main
 
-from .conftest import MakePdf
+from .conftest import MakeSource
 
 
 @pytest.fixture
@@ -21,11 +21,11 @@ def workdir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 def test_default_target_is_source_stem_in_current_folder(
-    workdir: Path, tmp_path: Path, make_pdf: MakePdf, capsys: pytest.CaptureFixture[str]
+    workdir: Path, tmp_path: Path, make_source: MakeSource, capsys: pytest.CaptureFixture[str]
 ) -> None:
     elsewhere = tmp_path / "downloads"
     elsewhere.mkdir()
-    source = make_pdf(elsewhere / "report.pdf", ["Hello world"])
+    source = make_source(elsewhere / "report.pdf", ["Hello world"])
 
     exit_code = main([str(source)])
 
@@ -39,9 +39,9 @@ def test_default_target_is_source_stem_in_current_folder(
 
 @pytest.mark.parametrize("name", ["notes.md", "notes.txt", "notes"])
 def test_explicit_target_is_used_exactly_as_given(
-    workdir: Path, make_pdf: MakePdf, capsys: pytest.CaptureFixture[str], name: str
+    workdir: Path, make_source: MakeSource, capsys: pytest.CaptureFixture[str], name: str
 ) -> None:
-    source = make_pdf(workdir / "report.pdf", ["Hello world"])
+    source = make_source(workdir / "report.pdf", ["Hello world"])
     target_folder = workdir / "out"
     target_folder.mkdir()
 
@@ -54,9 +54,9 @@ def test_explicit_target_is_used_exactly_as_given(
 
 
 def test_folder_target_gets_source_stem_inside_it(
-    workdir: Path, make_pdf: MakePdf, capsys: pytest.CaptureFixture[str]
+    workdir: Path, make_source: MakeSource, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    source = make_pdf(workdir / "report.pdf", ["Hello world"])
+    source = make_source(workdir / "report.pdf", ["Hello world"])
     target_folder = workdir / "out"
     target_folder.mkdir()
 
@@ -68,9 +68,9 @@ def test_folder_target_gets_source_stem_inside_it(
 
 
 def test_existing_target_is_never_overwritten_and_gets_numbered(
-    workdir: Path, make_pdf: MakePdf, capsys: pytest.CaptureFixture[str]
+    workdir: Path, make_source: MakeSource, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    source = make_pdf(workdir / "report.pdf", ["Hello world"])
+    source = make_source(workdir / "report.pdf", ["Hello world"])
     (workdir / "report.md").write_text("hand edited", encoding="utf-8")
 
     exit_code = main([str(source)])
@@ -98,13 +98,13 @@ def test_existing_target_is_never_overwritten_and_gets_numbered(
 )
 def test_numbering_picks_lowest_free_number_for_every_kind_of_target(
     workdir: Path,
-    make_pdf: MakePdf,
+    make_source: MakeSource,
     capsys: pytest.CaptureFixture[str],
     existing: list[str],
     requested: str | None,
     expected: str,
 ) -> None:
-    source = make_pdf(workdir / "report.pdf", ["Hello world"])
+    source = make_source(workdir / "report.pdf", ["Hello world"])
     (workdir / "out").mkdir()
     for name in existing:
         (workdir / name).write_text("keep me", encoding="utf-8")
@@ -120,9 +120,9 @@ def test_numbering_picks_lowest_free_number_for_every_kind_of_target(
 
 
 def test_target_in_missing_folder_fails_without_creating_it(
-    workdir: Path, make_pdf: MakePdf, capsys: pytest.CaptureFixture[str]
+    workdir: Path, make_source: MakeSource, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    source = make_pdf(workdir / "report.pdf", ["Hello world"])
+    source = make_source(workdir / "report.pdf", ["Hello world"])
 
     exit_code = main([str(source), "missing/dir/notes.md"])
 
@@ -166,8 +166,8 @@ def test_source_that_is_not_a_pdf_fails(
     _assert_failed_with_one_line(capsys, workdir, "not a PDF", "fake.pdf")
 
 
-def test_real_pdf_without_pdf_extension_is_accepted(workdir: Path, make_pdf: MakePdf) -> None:
-    source = make_pdf(workdir / "download", ["Hello world"])
+def test_real_pdf_without_pdf_extension_is_accepted(workdir: Path, make_source: MakeSource) -> None:
+    source = make_source(workdir / "download", ["Hello world"])
 
     exit_code = main([str(source)])
 
@@ -176,17 +176,23 @@ def test_real_pdf_without_pdf_extension_is_accepted(workdir: Path, make_pdf: Mak
 
 
 class FakeTerminal:
-    """Stands in for the person at the terminal: answers password prompts in order."""
+    """Stands in for the person at the terminal: answers password prompts in order.
+
+    An exception in ``answers`` is raised instead, e.g. ``KeyboardInterrupt`` for Ctrl-C.
+    """
 
     def __init__(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        self.answers: list[str] = []
+        self.answers: list[str | BaseException] = []
         self.prompts: list[str] = []
         monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
         monkeypatch.setattr(getpass, "getpass", self._getpass)
 
     def _getpass(self, prompt: str = "Password: ", stream: object = None) -> str:
         self.prompts.append(prompt)
-        return self.answers.pop(0)
+        answer = self.answers.pop(0)
+        if isinstance(answer, BaseException):
+            raise answer
+        return answer
 
 
 @pytest.fixture
@@ -195,9 +201,9 @@ def terminal(monkeypatch: pytest.MonkeyPatch) -> FakeTerminal:
 
 
 def test_password_protected_source_converts_with_the_password_typed_at_the_prompt(
-    workdir: Path, make_pdf: MakePdf, terminal: FakeTerminal, capsys: pytest.CaptureFixture[str]
+    workdir: Path, make_source: MakeSource, terminal: FakeTerminal, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    source = make_pdf(workdir / "secret.pdf", ["Hello world"], password="hunter2")
+    source = make_source(workdir / "secret.pdf", ["Hello world"], password="hunter2")
     terminal.answers = ["hunter2"]
 
     exit_code = main([str(source)])
@@ -209,9 +215,9 @@ def test_password_protected_source_converts_with_the_password_typed_at_the_promp
 
 
 def test_wrong_password_is_asked_again(
-    workdir: Path, make_pdf: MakePdf, terminal: FakeTerminal, capsys: pytest.CaptureFixture[str]
+    workdir: Path, make_source: MakeSource, terminal: FakeTerminal, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    source = make_pdf(workdir / "secret.pdf", ["Hello world"], password="hunter2")
+    source = make_source(workdir / "secret.pdf", ["Hello world"], password="hunter2")
     terminal.answers = ["nope", "", "hunter2"]
 
     exit_code = main([str(source)])
@@ -223,9 +229,9 @@ def test_wrong_password_is_asked_again(
 
 
 def test_three_wrong_passwords_fail(
-    workdir: Path, make_pdf: MakePdf, terminal: FakeTerminal, capsys: pytest.CaptureFixture[str]
+    workdir: Path, make_source: MakeSource, terminal: FakeTerminal, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    source = make_pdf(workdir / "secret.pdf", ["Hello world"], password="hunter2")
+    source = make_source(workdir / "secret.pdf", ["Hello world"], password="hunter2")
     terminal.answers = ["a", "b", "c", "hunter2"]
 
     exit_code = main([str(source)])
@@ -240,11 +246,11 @@ def test_three_wrong_passwords_fail(
 
 def test_password_protected_source_fails_without_a_terminal_to_ask(
     workdir: Path,
-    make_pdf: MakePdf,
+    make_source: MakeSource,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    source = make_pdf(workdir / "secret.pdf", ["Hello world"], password="hunter2")
+    source = make_source(workdir / "secret.pdf", ["Hello world"], password="hunter2")
     monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
 
     def no_prompt(*args: object, **kwargs: object) -> str:
@@ -259,9 +265,9 @@ def test_password_protected_source_fails_without_a_terminal_to_ask(
 
 
 def test_source_with_only_an_owner_password_converts_without_asking(
-    workdir: Path, make_pdf: MakePdf, terminal: FakeTerminal
+    workdir: Path, make_source: MakeSource, terminal: FakeTerminal
 ) -> None:
-    source = make_pdf(workdir / "locked.pdf", ["Hello world"], owner_password="owner")
+    source = make_source(workdir / "locked.pdf", ["Hello world"], owner_password="owner")
 
     exit_code = main([str(source)])
 
@@ -295,11 +301,11 @@ def test_source_with_no_pages_fails(workdir: Path, capsys: pytest.CaptureFixture
 )
 def test_scanned_source_is_converted_with_a_warning(
     workdir: Path,
-    make_pdf: MakePdf,
+    make_source: MakeSource,
     capsys: pytest.CaptureFixture[str],
     pages: list[str | None],
 ) -> None:
-    source = make_pdf(workdir / "scan.pdf", pages)
+    source = make_source(workdir / "scan.pdf", pages)
 
     exit_code = main([str(source)])
 
@@ -320,11 +326,11 @@ def test_scanned_source_is_converted_with_a_warning(
 )
 def test_source_with_mostly_text_converts_without_warning(
     workdir: Path,
-    make_pdf: MakePdf,
+    make_source: MakeSource,
     capsys: pytest.CaptureFixture[str],
     pages: list[str | None],
 ) -> None:
-    source = make_pdf(workdir / "doc.pdf", pages)
+    source = make_source(workdir / "doc.pdf", pages)
 
     exit_code = main([str(source)])
 
@@ -333,9 +339,9 @@ def test_source_with_mostly_text_converts_without_warning(
 
 
 def test_markdown_keeps_headings_and_joins_pages_into_one_document(
-    workdir: Path, make_pdf: MakePdf
+    workdir: Path, make_source: MakeSource
 ) -> None:
-    source = make_pdf(
+    source = make_source(
         workdir / "doc.pdf",
         ["# Introduction\nFirst page body.", "Second page body."],
     )
@@ -348,10 +354,10 @@ def test_markdown_keeps_headings_and_joins_pages_into_one_document(
     assert markdown.index("First page body.") < markdown.index("Second page body.")
 
 
-def test_images_are_dropped_so_only_one_markdown_file_is_written(
-    workdir: Path, make_pdf: MakePdf
+def test_images_are_dropped_so_only_the_target_is_written(
+    workdir: Path, make_source: MakeSource
 ) -> None:
-    source = make_pdf(workdir / "doc.pdf", ["Text page", None, "More text"])
+    source = make_source(workdir / "doc.pdf", ["Text page", None, "More text"])
 
     assert main([str(source)]) == 0
 
@@ -359,8 +365,8 @@ def test_images_are_dropped_so_only_one_markdown_file_is_written(
     assert "![" not in (workdir / "doc.md").read_text(encoding="utf-8")
 
 
-def test_non_ascii_text_survives_as_utf8(workdir: Path, make_pdf: MakePdf) -> None:
-    source = make_pdf(workdir / "doc.pdf", ["Olá, ação e coração"])
+def test_non_ascii_text_survives_as_utf8(workdir: Path, make_source: MakeSource) -> None:
+    source = make_source(workdir / "doc.pdf", ["Olá, ação e coração"])
 
     assert main([str(source)]) == 0
 
@@ -394,9 +400,9 @@ def test_version_prints_the_package_version(
 
 
 def test_unwritable_target_folder_fails(
-    workdir: Path, make_pdf: MakePdf, capsys: pytest.CaptureFixture[str]
+    workdir: Path, make_source: MakeSource, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    source = make_pdf(workdir / "report.pdf", ["Hello world"])
+    source = make_source(workdir / "report.pdf", ["Hello world"])
     locked = workdir / "locked"
     locked.mkdir()
     locked.chmod(0o500)
@@ -411,9 +417,9 @@ def test_unwritable_target_folder_fails(
 
 
 def test_missing_folder_target_with_trailing_slash_fails(
-    workdir: Path, make_pdf: MakePdf, capsys: pytest.CaptureFixture[str]
+    workdir: Path, make_source: MakeSource, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    source = make_pdf(workdir / "report.pdf", ["Hello world"])
+    source = make_source(workdir / "report.pdf", ["Hello world"])
 
     exit_code = main([str(source), "nope/"])
 
@@ -423,9 +429,9 @@ def test_missing_folder_target_with_trailing_slash_fails(
 
 
 def test_scanned_source_warning_is_not_shown_when_the_conversion_fails(
-    workdir: Path, make_pdf: MakePdf, capsys: pytest.CaptureFixture[str]
+    workdir: Path, make_source: MakeSource, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    source = make_pdf(workdir / "scan.pdf", [None])
+    source = make_source(workdir / "scan.pdf", [None])
 
     exit_code = main([str(source), "missing/scan.md"])
 
@@ -446,9 +452,9 @@ def test_folder_given_as_source_fails(workdir: Path, capsys: pytest.CaptureFixtu
 
 
 def test_unreadable_source_fails(
-    workdir: Path, make_pdf: MakePdf, capsys: pytest.CaptureFixture[str]
+    workdir: Path, make_source: MakeSource, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    source = make_pdf(workdir / "report.pdf", ["Hello world"])
+    source = make_source(workdir / "report.pdf", ["Hello world"])
     source.chmod(0o000)
     try:
         exit_code = main([str(source)])
@@ -472,12 +478,12 @@ def test_unreadable_source_fails(
 )
 def test_relative_paths_are_read_against_current_folder_and_target_is_printed_absolute(
     workdir: Path,
-    make_pdf: MakePdf,
+    make_source: MakeSource,
     capsys: pytest.CaptureFixture[str],
     argv: list[str],
     expected: str,
 ) -> None:
-    make_pdf(workdir / "report.pdf", ["Hello world"])
+    make_source(workdir / "report.pdf", ["Hello world"])
     (workdir / "sub").mkdir()
 
     exit_code = main(argv)
@@ -490,11 +496,11 @@ def test_relative_paths_are_read_against_current_folder_and_target_is_printed_ab
 
 def test_conversion_failure_fails_with_one_line_and_leaves_no_target(
     workdir: Path,
-    make_pdf: MakePdf,
+    make_source: MakeSource,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    source = make_pdf(workdir / "report.pdf")
+    source = make_source(workdir / "report.pdf")
 
     def broken(*args: object, **kwargs: object) -> str:
         raise RuntimeError("layout engine exploded")
@@ -509,11 +515,11 @@ def test_conversion_failure_fails_with_one_line_and_leaves_no_target(
 
 def test_markdown_that_cannot_be_encoded_fails_and_leaves_no_target(
     workdir: Path,
-    make_pdf: MakePdf,
+    make_source: MakeSource,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    source = make_pdf(workdir / "report.pdf")
+    source = make_source(workdir / "report.pdf")
     # A lone surrogate is valid in a Python str but cannot be written as UTF-8.
     monkeypatch.setattr(pymupdf4llm, "to_markdown", lambda *a, **k: "broken \udc80 text")
 
@@ -525,12 +531,88 @@ def test_markdown_that_cannot_be_encoded_fails_and_leaves_no_target(
 
 @pytest.mark.parametrize("argv", [["report.pdf", ""], [""]], ids=["empty-target", "empty-source"])
 def test_empty_path_argument_is_a_usage_error(
-    workdir: Path, make_pdf: MakePdf, capsys: pytest.CaptureFixture[str], argv: list[str]
+    workdir: Path, make_source: MakeSource, capsys: pytest.CaptureFixture[str], argv: list[str]
 ) -> None:
-    make_pdf(workdir / "report.pdf")
+    make_source(workdir / "report.pdf")
 
     exit_code = main(argv)
 
     assert exit_code == 2
     assert "must not be empty" in capsys.readouterr().err
+    assert not list(workdir.glob("*.md"))
+
+
+def test_dangling_symlink_at_target_counts_as_existing_and_is_left_alone(
+    workdir: Path, make_source: MakeSource, capsys: pytest.CaptureFixture[str]
+) -> None:
+    source = make_source(workdir / "report.pdf")
+    (workdir / "report.md").symlink_to(workdir / "gone.md")
+
+    exit_code = main([str(source)])
+
+    assert exit_code == 0
+    assert (workdir / "report.md").is_symlink()
+    assert not (workdir / "gone.md").exists()
+    assert "Hello world" in (workdir / "report (1).md").read_text(encoding="utf-8")
+
+
+def test_multiline_conversion_error_is_reported_on_one_line(
+    workdir: Path,
+    make_source: MakeSource,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    source = make_source(workdir / "report.pdf")
+
+    def broken(*args: object, **kwargs: object) -> str:
+        raise RuntimeError("first line\nsecond line")
+
+    monkeypatch.setattr(pymupdf4llm, "to_markdown", broken)
+
+    exit_code = main([str(source)])
+
+    assert exit_code == 1
+    _assert_failed_with_one_line(capsys, workdir, "Cannot convert Source", "first line")
+
+
+def test_trailing_slash_on_an_existing_file_says_it_is_not_a_folder(
+    workdir: Path, make_source: MakeSource, capsys: pytest.CaptureFixture[str]
+) -> None:
+    source = make_source(workdir / "report.pdf")
+    (workdir / "notes.md").write_text("keep me", encoding="utf-8")
+
+    exit_code = main([str(source), "notes.md/"])
+
+    assert exit_code == 1
+    assert (workdir / "notes.md").read_text(encoding="utf-8") == "keep me"
+    err = capsys.readouterr().err
+    assert "is not a folder" in err
+    assert err.count("\n") == 1
+
+
+def test_target_is_checked_before_asking_for_the_password(
+    workdir: Path, make_source: MakeSource, terminal: FakeTerminal, capsys: pytest.CaptureFixture[str]
+) -> None:
+    source = make_source(workdir / "secret.pdf", password="hunter2")
+    terminal.answers = ["hunter2"]
+
+    exit_code = main([str(source), "missing/secret.md"])
+
+    assert exit_code == 1
+    assert terminal.prompts == []
+    assert "Target folder does not exist" in capsys.readouterr().err
+
+
+def test_ctrl_c_at_the_password_prompt_exits_130_with_one_line(
+    workdir: Path, make_source: MakeSource, terminal: FakeTerminal, capsys: pytest.CaptureFixture[str]
+) -> None:
+    source = make_source(workdir / "secret.pdf", password="hunter2")
+    terminal.answers = [KeyboardInterrupt()]
+
+    exit_code = main([str(source)])
+
+    assert exit_code == 130
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err.strip() == "kwamd: interrupted"
     assert not list(workdir.glob("*.md"))

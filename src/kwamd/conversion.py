@@ -23,5 +23,6 @@ def convert(source: Source) -> str:
         )
     except Exception as error:
         # PyMuPDF4LLM documents no exception types; any failure is the Source's.
-        raise KwamdError(f"Cannot convert Source {source.path}: {error}") from None
+        reason = " ".join(str(error).split())  # keep the report to one line
+        raise KwamdError(f"Cannot convert Source {source.path}: {reason}") from None
     return markdown

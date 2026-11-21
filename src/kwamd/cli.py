@@ -1,6 +1,7 @@
 """The ``kwamd`` command: argument parsing, orchestration and exit codes.
 
-Exit codes: 0 success, 1 Source or Target failure, 2 usage error (argparse).
+Exit codes: 0 success, 1 Source or Target failure, 2 usage error (argparse),
+130 interrupted (Ctrl-C).
 This is the only module that talks to the person: it prints and prompts.
 """
 
@@ -53,17 +54,21 @@ def main(argv: Sequence[str] | None = None) -> int:
     except KwamdError as error:
         print(f"kwamd: error: {error}", file=sys.stderr)
         return 1
+    except KeyboardInterrupt:
+        print("kwamd: interrupted", file=sys.stderr)
+        return 130
     print(target)
     return 0
 
 
 def _run(source_path: Path, requested_target: str | None) -> Path:
+    # Check the Target first, so nobody types a password only to hit a bad path.
+    target = resolve_target(source_path, requested_target, Path.cwd())
     with open_source(source_path, _passwords_from_prompt(source_path)) as source:
-        target = resolve_target(source_path, requested_target, Path.cwd())
         write_target(target, convert(source))
         if source.scanned:
             print(
-                f"kwamd: warning: Source looks scanned (most pages have no text): {source_path}; "
+                f"kwamd: warning: Source looks scanned (most pages have no text): {source.path}; "
                 "OCR is not supported yet, so the Target may be nearly empty",
                 file=sys.stderr,
             )
