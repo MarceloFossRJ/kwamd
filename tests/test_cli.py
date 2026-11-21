@@ -9,7 +9,7 @@ import pytest
 
 from kwamd import main
 
-from .conftest import MakeSource
+from .conftest import MakeSource, stderr_lines
 
 
 @pytest.fixture
@@ -136,9 +136,10 @@ def _assert_failed_with_one_line(
 ) -> None:
     captured = capsys.readouterr()
     assert captured.out == ""
-    assert captured.err.count("\n") == 1
+    [line] = stderr_lines(captured.err, workdir.parent)
+    assert line.startswith("kwamd: error: ")
     for fragment in fragments:
-        assert fragment in captured.err
+        assert fragment in line
     assert not list(workdir.glob("*.md"))
 
 
@@ -201,7 +202,10 @@ def terminal(monkeypatch: pytest.MonkeyPatch) -> FakeTerminal:
 
 
 def test_password_protected_source_converts_with_the_password_typed_at_the_prompt(
-    workdir: Path, make_source: MakeSource, terminal: FakeTerminal, capsys: pytest.CaptureFixture[str]
+    workdir: Path,
+    make_source: MakeSource,
+    terminal: FakeTerminal,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     source = make_source(workdir / "secret.pdf", ["Hello world"], password="hunter2")
     terminal.answers = ["hunter2"]
@@ -215,7 +219,10 @@ def test_password_protected_source_converts_with_the_password_typed_at_the_promp
 
 
 def test_wrong_password_is_asked_again(
-    workdir: Path, make_source: MakeSource, terminal: FakeTerminal, capsys: pytest.CaptureFixture[str]
+    workdir: Path,
+    make_source: MakeSource,
+    terminal: FakeTerminal,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     source = make_source(workdir / "secret.pdf", ["Hello world"], password="hunter2")
     terminal.answers = ["nope", "", "hunter2"]
@@ -225,11 +232,15 @@ def test_wrong_password_is_asked_again(
     assert exit_code == 0
     assert len(terminal.prompts) == 3
     assert "Hello world" in (workdir / "secret.md").read_text(encoding="utf-8")
-    assert capsys.readouterr().err.count("try again") == 2
+    lines = stderr_lines(capsys.readouterr().err, workdir.parent)
+    assert lines == ["kwamd: wrong password, try again"] * 2
 
 
 def test_three_wrong_passwords_fail(
-    workdir: Path, make_source: MakeSource, terminal: FakeTerminal, capsys: pytest.CaptureFixture[str]
+    workdir: Path,
+    make_source: MakeSource,
+    terminal: FakeTerminal,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     source = make_source(workdir / "secret.pdf", ["Hello world"], password="hunter2")
     terminal.answers = ["a", "b", "c", "hunter2"]
@@ -238,9 +249,10 @@ def test_three_wrong_passwords_fail(
 
     assert exit_code == 1
     assert len(terminal.prompts) == 3
-    err = capsys.readouterr().err
-    assert err.splitlines()[-1].startswith("kwamd: error: Wrong password")
-    assert "secret.pdf" in err.splitlines()[-1]
+    *retries, last = stderr_lines(capsys.readouterr().err, workdir.parent)
+    assert retries == ["kwamd: wrong password, try again"] * 2
+    assert last.startswith("kwamd: error: Wrong password for Source")
+    assert last.endswith("secret.pdf")
     assert not list(workdir.glob("*.md"))
 
 
@@ -314,9 +326,9 @@ def test_scanned_source_is_converted_with_a_warning(
     assert target.exists()
     captured = capsys.readouterr()
     assert captured.out == f"{target}\n"
-    assert captured.err.count("\n") == 1
-    assert "scanned" in captured.err
-    assert "OCR" in captured.err
+    [line] = stderr_lines(captured.err, workdir.parent)
+    assert line.startswith("kwamd: warning: Source looks scanned")
+    assert "OCR" in line
 
 
 @pytest.mark.parametrize(
@@ -374,7 +386,9 @@ def test_non_ascii_text_survives_as_utf8(workdir: Path, make_source: MakeSource)
 
 
 @pytest.mark.parametrize(
-    "argv", [[], ["a.pdf", "b.md", "c.md"], ["--force", "a.pdf"]], ids=["none", "extra", "unknown-flag"]
+    "argv",
+    [[], ["a.pdf", "b.md", "c.md"], ["--force", "a.pdf"]],
+    ids=["none", "extra", "unknown-flag"],
 )
 def test_wrong_usage_exits_2_with_usage_on_stderr(
     workdir: Path, capsys: pytest.CaptureFixture[str], argv: list[str]
@@ -436,10 +450,8 @@ def test_scanned_source_warning_is_not_shown_when_the_conversion_fails(
     exit_code = main([str(source), "missing/scan.md"])
 
     assert exit_code == 1
-    err = capsys.readouterr().err
-    assert "kwamd: warning:" not in err
-    assert err.startswith("kwamd: error:")
-    assert err.count("\n") == 1
+    [line] = stderr_lines(capsys.readouterr().err, workdir.parent)
+    assert line.startswith("kwamd: error: Target folder does not exist")
 
 
 def test_folder_given_as_source_fails(workdir: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -585,13 +597,15 @@ def test_trailing_slash_on_an_existing_file_says_it_is_not_a_folder(
 
     assert exit_code == 1
     assert (workdir / "notes.md").read_text(encoding="utf-8") == "keep me"
-    err = capsys.readouterr().err
-    assert "is not a folder" in err
-    assert err.count("\n") == 1
+    [line] = stderr_lines(capsys.readouterr().err, workdir.parent)
+    assert line.startswith("kwamd: error: Target is not a folder")
 
 
 def test_target_is_checked_before_asking_for_the_password(
-    workdir: Path, make_source: MakeSource, terminal: FakeTerminal, capsys: pytest.CaptureFixture[str]
+    workdir: Path,
+    make_source: MakeSource,
+    terminal: FakeTerminal,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     source = make_source(workdir / "secret.pdf", password="hunter2")
     terminal.answers = ["hunter2"]
@@ -600,11 +614,15 @@ def test_target_is_checked_before_asking_for_the_password(
 
     assert exit_code == 1
     assert terminal.prompts == []
-    assert "Target folder does not exist" in capsys.readouterr().err
+    [line] = stderr_lines(capsys.readouterr().err, workdir.parent)
+    assert line.startswith("kwamd: error: Target folder does not exist")
 
 
 def test_ctrl_c_at_the_password_prompt_exits_130_with_one_line(
-    workdir: Path, make_source: MakeSource, terminal: FakeTerminal, capsys: pytest.CaptureFixture[str]
+    workdir: Path,
+    make_source: MakeSource,
+    terminal: FakeTerminal,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     source = make_source(workdir / "secret.pdf", password="hunter2")
     terminal.answers = [KeyboardInterrupt()]
