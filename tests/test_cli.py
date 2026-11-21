@@ -4,6 +4,7 @@ import getpass
 import sys
 from pathlib import Path
 
+import pymupdf4llm
 import pytest
 
 from kwamd import main
@@ -290,7 +291,7 @@ def test_source_with_no_pages_fails(workdir: Path, capsys: pytest.CaptureFixture
 @pytest.mark.parametrize(
     "pages",
     [[None], [None, None, "Hello world"]],
-    ids=["image-only", "one-of-three-pages-has-text"],
+    ids=["scanned-source", "one-of-three-pages-has-text"],
 )
 def test_scanned_source_is_converted_with_a_warning(
     workdir: Path,
@@ -485,3 +486,51 @@ def test_relative_paths_are_read_against_current_folder_and_target_is_printed_ab
     target = workdir / expected
     assert "Hello world" in target.read_text(encoding="utf-8")
     assert capsys.readouterr().out == f"{target}\n"
+
+
+def test_conversion_failure_fails_with_one_line_and_leaves_no_target(
+    workdir: Path,
+    make_pdf: MakePdf,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    source = make_pdf(workdir / "report.pdf")
+
+    def broken(*args: object, **kwargs: object) -> str:
+        raise RuntimeError("layout engine exploded")
+
+    monkeypatch.setattr(pymupdf4llm, "to_markdown", broken)
+
+    exit_code = main([str(source)])
+
+    assert exit_code == 1
+    _assert_failed_with_one_line(capsys, workdir, "Cannot convert Source", "report.pdf")
+
+
+def test_markdown_that_cannot_be_encoded_fails_and_leaves_no_target(
+    workdir: Path,
+    make_pdf: MakePdf,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    source = make_pdf(workdir / "report.pdf")
+    # A lone surrogate is valid in a Python str but cannot be written as UTF-8.
+    monkeypatch.setattr(pymupdf4llm, "to_markdown", lambda *a, **k: "broken \udc80 text")
+
+    exit_code = main([str(source)])
+
+    assert exit_code == 1
+    _assert_failed_with_one_line(capsys, workdir, "Cannot write Target", "report.md")
+
+
+@pytest.mark.parametrize("argv", [["report.pdf", ""], [""]], ids=["empty-target", "empty-source"])
+def test_empty_path_argument_is_a_usage_error(
+    workdir: Path, make_pdf: MakePdf, capsys: pytest.CaptureFixture[str], argv: list[str]
+) -> None:
+    make_pdf(workdir / "report.pdf")
+
+    exit_code = main(argv)
+
+    assert exit_code == 2
+    assert "must not be empty" in capsys.readouterr().err
+    assert not list(workdir.glob("*.md"))

@@ -4,23 +4,24 @@ This is the only module that knows about PyMuPDF4LLM, so the converter can be
 swapped or augmented (e.g. with OCR) without touching the CLI.
 """
 
-from pathlib import Path
-
-import pymupdf
 import pymupdf4llm
 
+from kwamd.errors import KwamdError
+from kwamd.source import Source
 
-def convert(source: Path, password: str | None = None) -> str:
+
+def convert(source: Source) -> str:
     """Return the Markdown for the whole Source as one continuous document."""
-    with pymupdf.open(source) as doc:
-        if password is not None:
-            doc.authenticate(password)
+    try:
         markdown: str = pymupdf4llm.to_markdown(
-            doc,
+            source.document,
             write_images=False,
             embed_images=False,
             page_separators=False,
             use_ocr=False,
             show_progress=False,
         )
+    except Exception as error:
+        # PyMuPDF4LLM documents no exception types; any failure is the Source's.
+        raise KwamdError(f"Cannot convert Source {source.path}: {error}") from None
     return markdown
