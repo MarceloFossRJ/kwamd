@@ -14,7 +14,7 @@ The repository becomes a Claude Code plugin marketplace with one plugin, `kwamd`
 
 ```
 /plugin marketplace add MarceloFossRJ/kwamd
-/plugin install kwamd
+/plugin install kwamd@kwamd
 ```
 
 ## User Stories
@@ -25,7 +25,7 @@ The repository becomes a Claude Code plugin marketplace with one plugin, `kwamd`
 4. As a user, I want an agent that I asked for a file to put the Target where I said, or at kwamd's default, and tell me the path kwamd printed.
 5. As a user, I want the agent to use the path kwamd prints and never guess it, so that `report (1).md` is read instead of a stale `report.md`.
 6. As a user, I want the agent to tell me when a PDF looks scanned and its Markdown may be nearly empty (no OCR), and not present it as the document's content.
-7. As a user, I want the agent to pass on kwamd's image and link warnings from Markdown to PDF, and still tell me the PDF was written.
+7. As a user, I want the agent to pass on kwamd's image warnings from Markdown to PDF, and still tell me the PDF was written.
 8. As a user, I want the agent to never ask for or handle a PDF password. For a password-protected Source it tells me to run `! kwamd <file>` myself, which gives me the terminal prompt.
 9. As a user, I want the agent to tell me how to install kwamd when it's missing, and not install anything itself.
 10. As a user, I want to install the skill once and have it work in every project.
@@ -40,7 +40,7 @@ The repository becomes a Claude Code plugin marketplace with one plugin, `kwamd`
   - **Target placement.** If the user wants the file, pass their path or omit the target. If the agent only needs to read the result, pass a target inside the agent's scratch or temp directory.
   - **Result path.** On exit 0, the Target is the single absolute path on stdout. Read that path, never a guessed one.
   - **Scanned Source.** On the scanned-Source warning on stderr, tell the user the PDF looks scanned and the Markdown may be nearly empty because OCR isn't supported, before using any of it.
-  - **Markdown → PDF warnings.** Pass image and link warnings on to the user. The PDF was still written.
+  - **Markdown → PDF warnings.** Pass image warnings on to the user. The PDF was still written. (Unsupported links become plain text without a warning, so there are none to relay.)
   - **Exit 1.** Report kwamd's one-line error. If it says the Source is password-protected, tell the user to run `! kwamd <source> [target]` themselves. Never ask for the password and never pass one.
   - **Exit 2.** Usage error. Fix the invocation; don't retry blindly.
   - **Exit 130.** Interrupted. Report it; don't retry.

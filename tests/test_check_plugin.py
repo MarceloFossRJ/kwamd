@@ -4,10 +4,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from check_plugin import breaches
-
-PLUGIN_JSON = "plugins/kwamd/.claude-plugin/plugin.json"
-MARKETPLACE_JSON = ".claude-plugin/marketplace.json"
+from check_plugin import MARKETPLACE_JSON, PLUGIN_JSON, breaches
 
 
 def make_repo(
@@ -122,3 +119,10 @@ def test_every_breach_is_reported_together(tmp_path: Path) -> None:
         f"{PLUGIN_JSON}: version 9.9.9 does not match pyproject.toml version 1.2.3",
         f"{MARKETPLACE_JSON}: does not list the 'kwamd' plugin",
     ]
+
+
+def test_unreadable_pyproject_fails_in_one_line(tmp_path: Path) -> None:
+    repo = make_repo(tmp_path)
+    (repo / "pyproject.toml").write_text("[project\n")
+    [breach] = breaches(repo)
+    assert breach.startswith("pyproject.toml: cannot read [project].version (")

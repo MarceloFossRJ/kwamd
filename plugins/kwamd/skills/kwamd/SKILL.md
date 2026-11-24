@@ -5,11 +5,11 @@ description: Convert PDF ↔ Markdown with the kwamd command. Use when reading, 
 
 # kwamd
 
-`kwamd <source> [target]` converts a **Source** into a **Target** in the other format. A PDF Source (recognised by its content) becomes Markdown; a `.md`/`.markdown` Source becomes a PDF. kwamd never overwrites: when the Target exists it writes `name (1).md`, `name (2).md`, …
+`kwamd <source> [target]` converts a **Source** into a **Target** in the other format. A PDF Source (recognised by its content) becomes Markdown; a `.md`/`.markdown` Source becomes a PDF. kwamd never overwrites: when the Target exists it writes `name (1).md`, `name (2).md`, … That numbered name is the intended result; leave existing files exactly as they are.
 
 ## Steps
 
-1. **Check it's installed.** Run `command -v kwamd`. If nothing prints, stop and tell the user to install it from a clone of https://github.com/MarceloFossRJ/kwamd with `uv tool install .`. Installing is the user's call: leave it to them.
+1. **Check it's installed.** Run `command -v kwamd`. If nothing prints, stop and tell the user to install it from a clone of https://github.com/MarceloFossRJ/kwamd with `uv tool install .`. Installing is the user's call: run only the `kwamd` already on `PATH`, never a copy fetched with `uvx`, `pip` or a download.
 
 2. **Choose the Target.**
    - The user wants the file: pass the path they named, or omit `target` (kwamd then writes `<name>.md` or `<name>.pdf` in the current folder).
