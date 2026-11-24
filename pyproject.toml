@@ -36,7 +36,7 @@ filterwarnings = [
 
 [tool.mypy]
 strict = true
-files = ["src", "tests"]
+files = ["src", "tests", "scripts"]
 # PyMuPDF ships py.typed but leaves most functions unannotated.
 untyped_calls_exclude = ["pymupdf"]
 
