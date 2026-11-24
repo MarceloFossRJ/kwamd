@@ -1,0 +1,10 @@
+{
+  "name": "kwamd",
+  "version": "0.3.0",
+  "description": "Teaches Claude Code to read PDFs and make PDFs from Markdown with the kwamd command.",
+  "author": {
+    "name": "Marcelo Foss de Oliveira"
+  },
+  "repository": "https://github.com/MarceloFossRJ/kwamd",
+  "license": "AGPL-3.0-or-later"
+}

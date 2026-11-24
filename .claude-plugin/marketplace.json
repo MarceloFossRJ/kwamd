@@ -1,0 +1,16 @@
+{
+  "name": "kwamd",
+  "owner": {
+    "name": "Marcelo Foss de Oliveira"
+  },
+  "metadata": {
+    "description": "kwamd for Claude Code: convert a PDF to Markdown, or Markdown to a PDF."
+  },
+  "plugins": [
+    {
+      "name": "kwamd",
+      "description": "Teaches Claude Code to read PDFs and make PDFs from Markdown with the kwamd command.",
+      "source": "./plugins/kwamd"
+    }
+  ]
+}

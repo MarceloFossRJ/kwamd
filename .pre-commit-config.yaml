@@ -40,6 +40,13 @@ repos:
         language: system
         files: ^(docs/specs/|docs/agents/triage-labels\.md$|scripts/check_specs\.py$)
         pass_filenames: false
+      # The plugin's version follows the package's (docs/specs/agent-skill).
+      - id: check-plugin
+        name: plugin manifests match pyproject.toml
+        entry: uv run python scripts/check_plugin.py
+        language: system
+        files: ^(pyproject\.toml|\.claude-plugin/|plugins/|scripts/check_plugin\.py$)
+        pass_filenames: false
       # Secret and log files must stay ignored.
       - id: gitignore-guards
         name: .gitignore keeps secrets ignored
