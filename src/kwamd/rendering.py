@@ -86,21 +86,23 @@ def render_pdf(markdown: str, source_path: Path) -> Rendering:
     """
     quiet_mupdf()
     try:
-        html, images, warnings = _html(markdown, source_path.parent)
-        return Rendering(_layout(html, images), warnings)
+        html, images, warnings, title = _html(markdown, source_path.parent)
+        return Rendering(_layout(html, images, title or source_path.stem), warnings)
     except Exception as error:
         # Neither markdown-it-py nor Story documents its exception types, so
         # any failure is reported as the Source's.
         raise KwamdError(f"Cannot render Source {source_path}: {one_line(error)}") from None
 
 
-def _html(markdown: str, folder: Path) -> tuple[str, dict[str, bytes], list[str]]:
-    """The HTML for ``markdown``, the image files it refers to, and warnings."""
-    tokens = MARKDOWN.parse(markdown)
+def _html(markdown: str, folder: Path) -> tuple[str, dict[str, bytes], list[str], str]:
+    """The HTML for ``markdown``, the image files it refers to, warnings, and
+    the text of its first top-level heading (empty if it has none)."""
+    tokens = MARKDOWN.parse(_without_front_matter(markdown))
+    title = _first_top_level_heading(tokens)
     _vet_links(tokens, _add_heading_ids(tokens))
     images, warnings = _collect_images(tokens, folder)
     html: str = MARKDOWN.renderer.render(tokens, MARKDOWN.options, {})
-    return html, images, warnings
+    return html, images, warnings, title
 
 
 def _collect_images(tokens: list[Token], folder: Path) -> tuple[dict[str, bytes], list[str]]:
@@ -190,17 +192,65 @@ def _inline_children(tokens: list[Token]) -> list[Token]:
     return [child for token in tokens for child in token.children or []]
 
 
-def _layout(html: str, images: dict[str, bytes]) -> bytes:
+def _without_front_matter(markdown: str) -> str:
+    """``markdown`` without YAML front matter: when the first line is exactly
+    ``---``, everything up to and including the next such line. Without a
+    closing ``---`` it is returned whole."""
+    lines = markdown.splitlines(keepends=True)
+    if not lines or lines[0].rstrip("\r\n") != "---":
+        return markdown
+    for index, line in enumerate(lines[1:], start=1):
+        if line.rstrip("\r\n") == "---":
+            return "".join(lines[index + 1 :])
+    return markdown
+
+
+def _first_top_level_heading(tokens: list[Token]) -> str:
+    """The plain text of the first ``#`` heading, without its formatting."""
+    for opening, inline in pairwise(tokens):
+        if opening.type == "heading_open" and opening.tag == "h1":
+            return "".join(
+                child.content
+                for child in inline.children or []
+                if child.type in ("text", "code_inline")
+            ).strip()
+    return ""
+
+
+def _layout(html: str, images: dict[str, bytes], title: str) -> bytes:
     archive = pymupdf.Archive()
     for name, content in images.items():
         archive.add((content, name))
     story = pymupdf.Story(html, user_css=STYLE, archive=archive)
     document = story.write_with_links(lambda _n, _filled: (PAGE, CONTENT, None))
     try:
+        _number_pages(document)
+        document.set_metadata({"title": title})
         pdf: bytes = document.tobytes()
         return pdf
     finally:
         document.close()
+
+
+PAGE_NUMBER_FONT = "tiro"  # MuPDF's built-in Times, to sit with the serif body
+PAGE_NUMBER_SIZE = 9
+
+
+def _number_pages(document: pymupdf.Document) -> None:
+    """Draw each page's number, centred in the middle of the bottom margin."""
+    for index in range(document.page_count):
+        page = document.load_page(index)
+        number = str(index + 1)
+        width = pymupdf.get_text_length(
+            number, fontname=PAGE_NUMBER_FONT, fontsize=PAGE_NUMBER_SIZE
+        )
+        baseline = PAGE.height - MARGIN / 2 + PAGE_NUMBER_SIZE / 3
+        page.insert_text(
+            ((PAGE.width - width) / 2, baseline),
+            number,
+            fontname=PAGE_NUMBER_FONT,
+            fontsize=PAGE_NUMBER_SIZE,
+        )
 
 
 def _add_heading_ids(tokens: list[Token]) -> set[str]:

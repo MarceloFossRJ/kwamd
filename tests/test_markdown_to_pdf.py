@@ -659,3 +659,72 @@ def test_image_path_with_a_line_break_gives_a_one_line_warning(
 
     [line] = stderr_lines(capsys.readouterr().err, workdir.parent)
     assert line == "kwamd: warning: image not found, showing alt text instead: <tmp>/cwd/a b.png"
+
+
+def test_every_page_has_its_number_centred_in_the_bottom_margin(workdir: Path) -> None:
+    source = workdir / "notes.md"
+    source.write_text("# Long\n\n" + "A paragraph of filler text.\n\n" * 120, encoding="utf-8")
+
+    assert main([str(source)]) == 0
+
+    two_cm = 72 * 2 / 2.54
+    with pymupdf.open(workdir / "notes.pdf") as doc:
+        assert doc.page_count >= 3
+        for page in doc:
+            bottom_margin = pymupdf.Rect(
+                0, page.rect.height - two_cm, page.rect.width, page.rect.height
+            )
+            words = page.get_text("words", clip=bottom_margin)
+            assert [word[4] for word in words] == [str(page.number + 1)]
+            x0, _, x1, _ = words[0][:4]
+            assert (x0 + x1) / 2 == pytest.approx(page.rect.width / 2, abs=1)
+
+
+@pytest.mark.parametrize(
+    ("markdown", "title"),
+    [
+        ("## Intro\n\n# The **Big** `plan`\n\n# Second\n", "The Big plan"),
+        ("Just text, no heading.\n\n## Only a subheading\n", "meeting-notes"),
+    ],
+    ids=["first-h1", "no-h1"],
+)
+def test_pdf_title_is_first_top_level_heading_or_source_stem(
+    workdir: Path, markdown: str, title: str
+) -> None:
+    source = workdir / "meeting-notes.md"
+    source.write_text(markdown, encoding="utf-8")
+
+    assert main([str(source)]) == 0
+
+    with pymupdf.open(workdir / "meeting-notes.pdf") as doc:
+        assert doc.metadata["title"] == title
+        assert doc.metadata["author"] == ""
+
+
+@pytest.mark.parametrize("newline", ["\n", "\r\n"], ids=["lf", "crlf"])
+def test_front_matter_is_left_out(workdir: Path, newline: str) -> None:
+    source = workdir / "notes.md"
+    lines = ["---", "title: Secret plan", "tags: [a, b]", "---", "", "# Visible", "", "Body."]
+    source.write_bytes(newline.join(lines).encode("utf-8"))
+
+    assert main([str(source)]) == 0
+
+    text = pdf_text(workdir / "notes.pdf")
+    assert "Visible" in text
+    assert "Body." in text
+    assert "Secret plan" not in text
+    assert "tags" not in text
+
+
+@pytest.mark.parametrize(
+    "markdown",
+    ["---\ntitle: Kept\n\nNo closing line.\n", "\n---\ntitle: Kept\n---\n"],
+    ids=["unclosed", "not-first-line"],
+)
+def test_text_that_is_not_front_matter_renders(workdir: Path, markdown: str) -> None:
+    source = workdir / "notes.md"
+    source.write_text(markdown, encoding="utf-8")
+
+    assert main([str(source)]) == 0
+
+    assert "title: Kept" in pdf_text(workdir / "notes.pdf")
