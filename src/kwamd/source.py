@@ -1,4 +1,5 @@
-"""Recognising and opening a Source: a PDF Source by content, a Markdown Source by extension."""
+"""Recognising and reading a Source: a PDF Source by content, a Markdown Source by
+extension (read as text, without its front matter)."""
 
 from collections.abc import Iterable
 from pathlib import Path
@@ -121,10 +122,10 @@ def _without_front_matter(markdown: str) -> str:
     every character ``str.splitlines`` treats as a break.
     """
     lines = markdown.split("\n")
-    if lines[0].rstrip("\r") != "---":
+    if lines[0].removesuffix("\r") != "---":
         return markdown
     for index, line in enumerate(lines[1:], start=1):
-        if line.rstrip("\r") == "---":
+        if line.removesuffix("\r") == "---":
             return "\n".join(lines[index + 1 :])
     return markdown
 

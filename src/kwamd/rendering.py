@@ -129,25 +129,31 @@ def _headings(tokens: list[Token]) -> list[tuple[Token, Token]]:
 
 
 def _title(headings: list[tuple[Token, Token]]) -> str | None:
-    """The first top-level ``#`` heading as plain text, ignoring headings in a
-    quote or list."""
+    """The first non-empty top-level h1 (``#`` or setext ``===``) as plain
+    text. Headings in a quote or list don't count."""
     for opening, inline in headings:
-        if opening.tag == "h1" and opening.level == 0:
-            return _plain_text(inline) or None
+        if opening.tag == "h1" and opening.level == 0 and (text := _plain_text(inline)):
+            return text
     return None
 
 
 def _plain_text(inline: Token) -> str:
     """An inline token's text without its formatting: an image counts as its
-    alt text, and line breaks and runs of spaces (no-break ones too) as one
-    space."""
+    alt text (itself without formatting), and line breaks and runs of spaces
+    (no-break ones too) as one space."""
+    return " ".join(_text_parts(inline.children or []).split())
+
+
+def _text_parts(children: list[Token]) -> str:
     parts = []
-    for child in inline.children or []:
-        if child.type in ("text", "code_inline", "image"):
+    for child in children:
+        if child.type in ("text", "code_inline"):
             parts.append(child.content)
+        elif child.type == "image":
+            parts.append(_text_parts(child.children or []))
         elif child.type in ("softbreak", "hardbreak"):
             parts.append(" ")
-    return " ".join("".join(parts).split())
+    return "".join(parts)
 
 
 def _collect_images(tokens: list[Token], folder: Path) -> tuple[dict[str, bytes], list[str]]:
@@ -174,7 +180,7 @@ def _collect_images(tokens: list[Token], folder: Path) -> tuple[dict[str, bytes]
                 continue
         except _UnusableImage as unusable:
             warnings.append(one_line(unusable))
-        children[index] = Token("text", "", 0, content=image.content)  # its alt text
+        children[index] = Token("text", "", 0, content=_plain_text(image))  # its alt text
     if remote:
         warnings.append(
             f"remote images are not downloaded; showing alt text instead: {remote} image(s)"
@@ -277,7 +283,7 @@ def _add_heading_ids(headings: list[tuple[Token, Token]]) -> set[str]:
     """
     ids: set[str] = set()
     for opening, inline in headings:
-        slug = heading_id = _slug(inline.content)
+        slug = heading_id = _slug(_plain_text(inline))
         n = 0
         while heading_id in ids:
             n += 1

@@ -744,7 +744,7 @@ def test_markdown_source_with_only_front_matter_fails_as_empty(
     assert_failed_with_one_line(capsys, workdir, "Source is empty", "notes.md", target_glob="*.pdf")
 
 
-def test_front_matter_ends_only_at_a_real_line_break(workdir: Path) -> None:
+def test_markdown_source_front_matter_ends_only_at_a_real_line_break(workdir: Path) -> None:
     source = workdir / "notes.md"
     # A form feed is a line break to Python's splitlines, but not to Markdown.
     source.write_text("---\nnote: a\f---\nkey: hidden\n---\nBody.\n", encoding="utf-8")
@@ -763,8 +763,17 @@ def test_front_matter_ends_only_at_a_real_line_break(workdir: Path) -> None:
         ("Two line\nsetext\n===\n", "Two line setext"),
         ("# Price 5\u00a0EUR\n", "Price 5 EUR"),
         ("> # Quoted\n\n- # In a list\n\n# Real title\n", "Real title"),
+        ("# ![**Bold** _alt_](x.png) text\n", "Bold alt text"),
+        ("#\n\n# Later heading\n", "Later heading"),
     ],
-    ids=["image-alt", "setext-two-lines", "no-break-space", "top-level-only"],
+    ids=[
+        "image-alt",
+        "setext-two-lines",
+        "no-break-space",
+        "top-level-only",
+        "formatted-alt",
+        "empty-first-heading",
+    ],
 )
 def test_target_title_is_the_heading_as_plain_text(
     workdir: Path, markdown: str, title: str
@@ -776,3 +785,38 @@ def test_target_title_is_the_heading_as_plain_text(
 
     with pymupdf.open(workdir / "notes.pdf") as doc:
         assert doc.metadata["title"] == title
+
+
+def test_markdown_source_line_ending_in_two_carriage_returns_is_not_front_matter(
+    workdir: Path,
+) -> None:
+    source = workdir / "notes.md"
+    source.write_bytes(b"---\r\r\ntitle: kept\n---\nBody.\n")
+
+    assert main([str(source)]) == 0
+
+    assert "title: kept" in pdf_text(workdir / "notes.pdf")
+
+
+def test_heading_link_id_ignores_link_markup_like_github(workdir: Path) -> None:
+    source = workdir / "notes.md"
+    source.write_text(
+        "Go [there](#see-docs).\n\n" + "Filler.\n\n" * 80 + "## See [docs](https://example.org)\n",
+        encoding="utf-8",
+    )
+
+    assert main([str(source)]) == 0
+
+    target = workdir / "notes.pdf"
+    assert _link_pages(target)["there"] == _page_of(target, "See docs")
+
+
+def test_missing_image_alt_text_is_shown_without_its_markup(workdir: Path) -> None:
+    source = workdir / "notes.md"
+    source.write_text("![The **sales** chart](missing.png)\n", encoding="utf-8")
+
+    assert main([str(source)]) == 0
+
+    text = pdf_text(workdir / "notes.pdf")
+    assert "The sales chart" in text
+    assert "**" not in text
