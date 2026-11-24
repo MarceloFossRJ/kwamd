@@ -3,7 +3,7 @@
 from collections.abc import Iterable
 from pathlib import Path
 from types import TracebackType
-from typing import Self
+from typing import Literal, Self
 
 import pymupdf
 
@@ -67,3 +67,47 @@ def open_source(path: Path, passwords: Iterable[str]) -> Source:
     except BaseException:
         document.close()
         raise
+
+
+type SourceKind = Literal["pdf", "markdown"]
+
+MARKDOWN_SUFFIXES = (".md", ".markdown")
+PDF_SIGNATURE = b"%PDF-"
+SIGNATURE_WINDOW = 1024
+"""PDF readers accept a signature anywhere in the first kilobyte."""
+
+
+def source_kind(path: Path) -> SourceKind:
+    """Say which kind of Source ``path`` is, without opening it as a document.
+
+    A PDF Source is known by its content, a Markdown Source by its extension.
+    """
+    if path.is_dir():
+        raise KwamdError(f"Source is a folder, not a PDF: {path}")
+    if not path.exists():
+        raise KwamdError(f"Source does not exist: {path}")
+    try:
+        with path.open("rb") as file:
+            head = file.read(SIGNATURE_WINDOW)
+    except OSError as error:
+        raise KwamdError(f"Cannot read Source {path}: {error.strerror}") from None
+    if PDF_SIGNATURE in head:
+        return "pdf"
+    if path.suffix.lower() in MARKDOWN_SUFFIXES:
+        return "markdown"
+    raise KwamdError(f"Source is neither a PDF nor Markdown: {path}")
+
+
+def read_markdown_source(path: Path) -> str:
+    """Return the text of a Markdown Source."""
+    try:
+        content = path.read_bytes()
+    except OSError as error:
+        raise KwamdError(f"Cannot read Source {path}: {error.strerror}") from None
+    try:
+        text = content.decode("utf-8-sig")  # a leading byte-order mark is fine
+    except UnicodeDecodeError:
+        raise KwamdError(f"Source is not UTF-8 text: {path}") from None
+    if not text.strip():
+        raise KwamdError(f"Source is empty: {path}")
+    return text

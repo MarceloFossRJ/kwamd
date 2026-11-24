@@ -155,7 +155,7 @@ def test_missing_source_fails(workdir: Path, capsys: pytest.CaptureFixture[str])
     [b"PK\x03\x04 this is really a docx", b"just some text\n", b""],
     ids=["zip", "text", "empty-file"],
 )
-def test_source_that_is_not_a_pdf_fails(
+def test_source_that_is_neither_pdf_nor_markdown_fails(
     workdir: Path, capsys: pytest.CaptureFixture[str], content: bytes
 ) -> None:
     fake = workdir / "fake.pdf"
@@ -164,7 +164,7 @@ def test_source_that_is_not_a_pdf_fails(
     exit_code = main([str(fake)])
 
     assert exit_code == 1
-    _assert_failed_with_one_line(capsys, workdir, "not a PDF", "fake.pdf")
+    _assert_failed_with_one_line(capsys, workdir, "neither a PDF nor Markdown", "fake.pdf")
 
 
 def test_real_pdf_without_pdf_extension_is_accepted(workdir: Path, make_source: MakeSource) -> None:
