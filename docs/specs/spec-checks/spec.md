@@ -12,7 +12,7 @@ Rules that a script can check are enforced by tooling, not left to review. Two c
 - `scripts/check_specs.py`: every feature folder has a `spec.md`; issue files are named `issues/NN-slug.md`; every issue has a `Status:` line with a label from `docs/agents/triage-labels.md`.
 - `scripts/check_gitignore.sh`: `.pypirc`, `.env` and `*.log` stay ignored.
 - Both run as pre-commit hooks and in CI.
-- `resolved` joins the triage labels, so finished issues have a status to move to.
+- `resolved` joins the triage labels, so finished issues have a status to move to. `claimed`, which Wayfinder tickets already use, joins the table too, so the table is the one list of allowed labels.
 
 ## Issues
 
