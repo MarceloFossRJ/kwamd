@@ -1,7 +1,6 @@
 """Behaviour of ``kwamd`` for a Markdown Source, tested through ``main(argv)``."""
 
 import os
-import unicodedata
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -12,14 +11,15 @@ import pytest
 
 from kwamd import main
 
-from .conftest import MakeSource, assert_failed_with_one_line, stderr_lines
-
-
-def pdf_text(path: Path) -> str:
-    """The PDF's text, NFKC-normalised: ligatures such as "ﬁ" and Arabic
-    presentation forms come back as the plain characters that were written."""
-    with pymupdf.open(path) as doc:
-        return unicodedata.normalize("NFKC", "".join(str(page.get_text()) for page in doc))
+from .conftest import (
+    MakeSource,
+    assert_failed_with_one_line,
+    image_count,
+    link_pages,
+    page_of,
+    pdf_text,
+    stderr_lines,
+)
 
 
 def test_markdown_source_becomes_pdf_target_in_current_folder(
@@ -269,7 +269,7 @@ def test_web_links_and_heading_links_are_clickable(workdir: Path) -> None:
 
     with pymupdf.open(workdir / "notes.pdf") as doc:
         links = doc[0].get_links()
-        [heading_page] = [p.number for p in doc if "Next steps" in str(p.get_text())]
+    heading_page = page_of(workdir / "notes.pdf", "Next steps")
     assert heading_page > 0
     # Story adds one link area per word, so compare where the links go, not how many.
     assert {link["uri"] for link in links if link["kind"] == pymupdf.LINK_URI} == {
@@ -288,8 +288,8 @@ def test_link_to_a_missing_heading_renders_as_plain_text(
 
     assert exit_code == 0
     assert capsys.readouterr().err == ""
+    assert "the plan" in pdf_text(workdir / "notes.pdf")
     with pymupdf.open(workdir / "notes.pdf") as doc:
-        assert "the plan" in str(doc[0].get_text())
         assert doc[0].get_links() == []
 
 
@@ -392,23 +392,6 @@ def test_interrupted_markdown_conversion_leaves_no_target(
     assert not list(workdir.glob("*.pdf"))
 
 
-def _link_pages(path: Path) -> dict[str, int]:
-    """Where each in-document link on the first page goes, keyed by its text."""
-    with pymupdf.open(path) as doc:
-        page = doc[0]
-        return {
-            str(page.get_textbox(link["from"])).strip(): link["page"]
-            for link in page.get_links()
-            if link["kind"] == pymupdf.LINK_GOTO
-        }
-
-
-def _page_of(path: Path, text: str) -> int:
-    with pymupdf.open(path) as doc:
-        [number] = [int(page.number) for page in doc if text in str(page.get_text())]
-    return number
-
-
 @pytest.mark.parametrize(
     ("link", "heading"),
     [("#café-menu", "Café menu"), ("#Next-Steps", "Next steps")],
@@ -424,7 +407,7 @@ def test_heading_links_match_like_github(workdir: Path, link: str, heading: str)
     assert main([str(source)]) == 0
 
     target = workdir / "notes.pdf"
-    assert _link_pages(target) == {"there": _page_of(target, heading)}
+    assert link_pages(target) == {"there": page_of(target, heading)}
 
 
 def test_repeated_headings_get_distinct_ids_like_github(workdir: Path) -> None:
@@ -442,10 +425,10 @@ def test_repeated_headings_get_distinct_ids_like_github(workdir: Path) -> None:
     assert main([str(source)]) == 0
 
     target = workdir / "notes.pdf"
-    assert _link_pages(target) == {
-        "a": _page_of(target, "First."),
-        "b": _page_of(target, "Second."),
-        "c": _page_of(target, "Third."),
+    assert link_pages(target) == {
+        "a": page_of(target, "First."),
+        "b": page_of(target, "Second."),
+        "c": page_of(target, "Third."),
     }
 
 
@@ -455,11 +438,6 @@ def _write_png(path: Path) -> Path:
     pixmap.clear_with(120)
     pixmap.save(str(path))
     return path
-
-
-def _image_count(path: Path) -> int:
-    with pymupdf.open(path) as doc:
-        return sum(len(page.get_images()) for page in doc)
 
 
 @pytest.mark.parametrize("image", ["chart.png", "img/chart.png", "../shared/chart.png"])
@@ -474,7 +452,7 @@ def test_local_image_is_embedded(
     assert main([str(source)]) == 0
 
     target = workdir / "notes.pdf"
-    assert _image_count(target) == 1
+    assert image_count(target) == 1
     assert "A chart" not in pdf_text(target)
     assert stderr_lines(capsys.readouterr().err, workdir.parent) == []
 
@@ -500,7 +478,7 @@ def test_remote_images_show_alt_text_with_one_warning(
     text = pdf_text(target)
     assert "Team photo" in text
     assert "Logo" in text
-    assert _image_count(target) == 0
+    assert image_count(target) == 0
 
 
 @pytest.mark.parametrize(
@@ -532,7 +510,7 @@ def test_unusable_local_image_shows_alt_text_with_a_warning(
         f"kwamd: warning: {reason}, showing alt text instead: <tmp>/cwd/chart.png"
     ]
     assert "Sales chart" in pdf_text(target)
-    assert _image_count(target) == 0
+    assert image_count(target) == 0
 
 
 @pytest.mark.skipif(os.geteuid() == 0, reason="root can read a file with no permissions")
@@ -566,7 +544,7 @@ def test_svg_image_is_embedded(workdir: Path, capsys: pytest.CaptureFixture[str]
 
     assert main([str(source)]) == 0
 
-    assert _image_count(workdir / "notes.pdf") == 1
+    assert image_count(workdir / "notes.pdf") == 1
     assert stderr_lines(capsys.readouterr().err, workdir.parent) == []
 
 
@@ -587,7 +565,7 @@ def test_cut_off_image_shows_alt_text_with_a_warning(
     assert stderr_lines(capsys.readouterr().err, workdir.parent) == [
         "kwamd: warning: not a usable image, showing alt text instead: <tmp>/cwd/chart.png"
     ]
-    assert _image_count(workdir / "notes.pdf") == 0
+    assert image_count(workdir / "notes.pdf") == 0
 
 
 @pytest.mark.parametrize(
@@ -808,7 +786,7 @@ def test_heading_link_id_ignores_link_markup_like_github(workdir: Path) -> None:
     assert main([str(source)]) == 0
 
     target = workdir / "notes.pdf"
-    assert _link_pages(target)["there"] == _page_of(target, "See docs")
+    assert link_pages(target)["there"] == page_of(target, "See docs")
 
 
 def test_missing_image_alt_text_is_shown_without_its_markup(workdir: Path) -> None:
@@ -858,7 +836,7 @@ def test_jpeg_and_gif_images_are_embedded(
 
     assert main([str(source)]) == 0
 
-    assert _image_count(workdir / "notes.pdf") == 1
+    assert image_count(workdir / "notes.pdf") == 1
     assert stderr_lines(capsys.readouterr().err, workdir.parent) == []
 
 
@@ -877,4 +855,4 @@ def test_cut_off_jpeg_shows_alt_text_with_a_warning(
     assert stderr_lines(capsys.readouterr().err, workdir.parent) == [
         "kwamd: warning: not a usable image, showing alt text instead: <tmp>/cwd/photo.jpg"
     ]
-    assert _image_count(workdir / "notes.pdf") == 0
+    assert image_count(workdir / "notes.pdf") == 0

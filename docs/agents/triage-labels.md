@@ -10,7 +10,9 @@ The skills speak in terms of five canonical triage roles. This file maps those r
 | `ready-for-human`          | `ready-for-human`    | Requires human implementation            |
 | `wontfix`                  | `wontfix`            | Will not be actioned                     |
 | (none)                     | `claimed`            | Wayfinder ticket being worked on         |
-| (none)                     | `resolved`           | Done: the work is merged                 |
+| (none)                     | `resolved`           | Done by the PR that carries this change  |
+
+Set `resolved` in the PR that does the work, as its last commit; merging that PR is what makes it true, so no follow-up PR is needed.
 
 When a skill mentions a role (e.g. "apply the AFK-ready triage label"), use the corresponding label string from this table.
 
