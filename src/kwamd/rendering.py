@@ -12,7 +12,6 @@ from urllib.parse import unquote
 
 import pymupdf
 from markdown_it import MarkdownIt
-from markdown_it.common.normalize_url import validateLink
 from markdown_it.token import Token
 
 from kwamd.errors import KwamdError, one_line
@@ -39,14 +38,15 @@ blockquote { border-left: 3pt solid #bbbbbb; padding-left: 8pt; margin-left: 0; 
 
 
 class _Markdown(MarkdownIt):
-    """markdown-it, but letting ``file:`` and ``data:`` addresses through.
+    """markdown-it, letting every link and image address through.
 
-    markdown-it drops them before kwamd sees them, leaving the raw Markdown as
-    text; let through, an image with one can show its alt text instead.
+    markdown-it would leave a ``file:``, ``data:`` or ``javascript:`` address
+    as raw Markdown text. kwamd vets every address itself instead: see
+    ``_vet_links`` and ``_collect_images``.
     """
 
     def validateLink(self, url: str) -> bool:
-        return validateLink(url) or url.strip().lower().startswith(("file:", "data:"))
+        return True
 
 
 # Raw HTML is shown as text: Story supports only part of HTML (ADR 0002).
@@ -61,13 +61,20 @@ class Rendering:
     warnings: list[str]
 
 
-REMOTE = re.compile(r"(https?:)?//", re.IGNORECASE)
-SCHEME = re.compile(r"([a-z][a-z0-9+.-]+):", re.IGNORECASE)
+_REMOTE_ADDRESS = re.compile(r"(https?:)?//", re.IGNORECASE)
+_LINK_ADDRESS = re.compile(r"(https?:|mailto:)", re.IGNORECASE)
+"""Links that stay clickable, besides ``#heading`` links. Anything else, such
+as ``file:`` (which would make the PDF open a file) or ``javascript:``,
+renders as plain text."""
+_ADDRESS_SCHEME = re.compile(r"([a-z][a-z0-9+.-]+):", re.IGNORECASE)
 """An address scheme such as ``file:``; two letters at least, so ``C:`` isn't one."""
 
 
 class _UnusableImage(Exception):
-    """A local image that can't be embedded; the message says why."""
+    """A local image that can't be embedded."""
+
+    def __init__(self, reason: str, where: str) -> None:
+        super().__init__(f"{reason}, showing alt text instead: {where}")
 
 
 def render_pdf(markdown: str, source_path: Path) -> Rendering:
@@ -90,7 +97,7 @@ def render_pdf(markdown: str, source_path: Path) -> Rendering:
 def _html(markdown: str, folder: Path) -> tuple[str, dict[str, bytes], list[str]]:
     """The HTML for ``markdown``, the image files it refers to, and warnings."""
     tokens = MARKDOWN.parse(markdown)
-    _resolve_anchor_links(tokens, _add_heading_ids(tokens))
+    _vet_links(tokens, _add_heading_ids(tokens))
     images, warnings = _collect_images(tokens, folder)
     html: str = MARKDOWN.renderer.render(tokens, MARKDOWN.options, {})
     return html, images, warnings
@@ -101,39 +108,26 @@ def _collect_images(tokens: list[Token], folder: Path) -> tuple[dict[str, bytes]
 
     Paths are read against ``folder``; ``../`` and absolute paths are allowed,
     which Story's own archive of the folder couldn't reach. An image that is
-    remote (never downloaded), has an unsupported address, or can't be read
-    is replaced by its alt text, with a warning. Returns the image content by
-    name, and the warnings.
+    remote (never downloaded) or unusable is replaced by its alt text, with a
+    warning. Returns the image content by name, and the warnings.
     """
     images: dict[str, bytes] = {}
     warnings: list[str] = []
     remote = 0
-    for token in tokens:
-        children = token.children or []
-        for index, child in enumerate(children):
-            src = child.attrGet("src")
-            if child.type != "image" or not isinstance(src, str):
-                continue
-            problem = where = ""
-            if REMOTE.match(src):
+    for children, index, image in _images_in(tokens):
+        src = str(image.attrGet("src"))
+        try:
+            if _REMOTE_ADDRESS.match(src):
                 remote += 1
-            elif scheme := SCHEME.match(src):
-                problem, where = "unsupported image address", f"{scheme.group(1)}:…"
             else:
-                path = folder / unquote(src)
-                try:
-                    content = _read_image(path)
-                except _UnusableImage as unusable:
-                    problem, where = str(unusable), str(path)
-                else:
-                    name = f"image-{len(images)}{path.suffix}"
-                    images[name] = content
-                    child.attrSet("src", name)
-                    continue
-            # Shown as its alt text instead.
-            children[index] = Token("text", "", 0, content=child.content)
-            if problem:
-                warnings.append(f"{problem}, showing alt text instead: {where}")
+                content = _local_image(src, folder)
+                name = f"image-{len(images)}{Path(src).suffix}"
+                images[name] = content
+                image.attrSet("src", name)
+                continue
+        except _UnusableImage as unusable:
+            warnings.append(one_line(unusable))
+        children[index] = Token("text", "", 0, content=image.content)  # its alt text
     if remote:
         warnings.append(
             f"remote images are not downloaded; showing alt text instead: {remote} image(s)"
@@ -141,29 +135,55 @@ def _collect_images(tokens: list[Token], folder: Path) -> tuple[dict[str, bytes]
     return images, warnings
 
 
-def _read_image(path: Path) -> bytes:
-    """The content of the image at ``path``, or ``_UnusableImage`` saying why not."""
+def _images_in(tokens: list[Token]) -> list[tuple[list[Token], int, Token]]:
+    """Each image token, with the list holding it and its index there, so it
+    can be replaced."""
+    return [
+        (children, index, child)
+        for token in tokens
+        for children in [token.children or []]
+        for index, child in enumerate(children)
+        if child.type == "image"
+    ]
+
+
+def _local_image(src: str, folder: Path) -> bytes:
+    """The content of the image at ``src``, read against ``folder``, or
+    ``_UnusableImage`` saying why it can't be embedded."""
+    if scheme := _ADDRESS_SCHEME.match(src):
+        raise _UnusableImage("unsupported image address", f"{scheme.group(1)}:…")
+    path = folder / unquote(src)
     if not path.exists():
-        raise _UnusableImage("image not found")
-    if path.is_dir():
-        raise _UnusableImage("not an image")
+        raise _UnusableImage("image not found", str(path))
     try:
         content = path.read_bytes()
+    except IsADirectoryError:
+        raise _UnusableImage("not a usable image", str(path)) from None
     except OSError as error:
-        raise _UnusableImage(f"cannot read image ({error.strerror or error})") from None
+        reason = f"cannot read image ({error.strerror or error})"
+        raise _UnusableImage(reason, str(path)) from None
+    if not _decodes_cleanly(content, path.suffix.lower() == ".svg"):
+        raise _UnusableImage("not a usable image", str(path))
+    return content
+
+
+def _decodes_cleanly(content: bytes, svg: bool) -> bool:
+    """Whether MuPDF decodes ``content`` as an image without complaint.
+
+    MuPDF decodes some cut-off images with only a warning, padding the rest,
+    so its warning log is cleared first and checked after. Nothing else
+    decodes in between, because kwamd does one thing at a time.
+    """
     pymupdf.TOOLS.mupdf_warnings(reset=True)
     try:
-        if path.suffix.lower() == ".svg":
+        if svg:
             pymupdf.open(stream=content, filetype="svg").close()
         else:
             pymupdf.Pixmap(content)
     except Exception:
-        # PyMuPDF documents no exception type for an unknown image format.
-        raise _UnusableImage("not an image") from None
-    # MuPDF decodes a cut-off image with only a warning, padding the rest.
-    if pymupdf.TOOLS.mupdf_warnings(reset=True):
-        raise _UnusableImage("damaged image")
-    return content
+        # PyMuPDF documents no exception type for an unknown or broken image.
+        return False
+    return not pymupdf.TOOLS.mupdf_warnings(reset=True)
 
 
 def _inline_children(tokens: list[Token]) -> list[Token]:
@@ -204,22 +224,23 @@ def _add_heading_ids(tokens: list[Token]) -> set[str]:
     return ids
 
 
-def _resolve_anchor_links(tokens: list[Token], ids: set[str]) -> None:
-    """Point each ``#…`` link at its heading id, matched the way GitHub does.
+def _vet_links(tokens: list[Token], ids: set[str]) -> None:
+    """Keep a link clickable only when it goes to a web or mail address, or to
+    a heading; any other link renders as plain text.
 
-    markdown-it percent-encodes link targets (``#café`` arrives as
-    ``#caf%C3%A9``) and GitHub ignores case, so both are undone before
-    matching. A link to a heading that doesn't exist becomes plain text,
-    because Story raises on a link whose target id is missing.
+    A ``#…`` link matches its heading the way GitHub does: markdown-it
+    percent-encodes it (``#café`` arrives as ``#caf%C3%A9``) and GitHub
+    ignores case, so both are undone first. A link to a heading that doesn't
+    exist becomes plain text too, because Story raises on a link whose target
+    id is missing.
     """
     for child in _inline_children(tokens):
         href = child.attrGet("href")
-        if child.type != "link_open" or not isinstance(href, str) or not href.startswith("#"):
+        if child.type != "link_open" or not isinstance(href, str):
             continue
-        wanted = unquote(href[1:]).lower()
-        if wanted in ids:
+        if href.startswith("#") and (wanted := unquote(href[1:]).lower()) in ids:
             child.attrSet("href", f"#{wanted}")
-        else:
+        elif href.startswith("#") or not _LINK_ADDRESS.match(href):
             del child.attrs["href"]
 
 
