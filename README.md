@@ -3,7 +3,8 @@
 A command-line tool that converts a PDF document into a Markdown file, or a Markdown file
 into a PDF document. It uses [PyMuPDF4LLM](https://github.com/pymupdf/pymupdf4llm) for PDF to
 Markdown, and [markdown-it-py](https://github.com/executablebooks/markdown-it-py) with
-[PyMuPDF](https://github.com/pymupdf/PyMuPDF) for Markdown to PDF.
+[PyMuPDF](https://github.com/pymupdf/PyMuPDF) (which comes with PyMuPDF4LLM) for Markdown
+to PDF.
 
 ## Install
 
@@ -26,7 +27,8 @@ kwamd <source> [target]
 ```
 
 The Source decides the direction: a PDF (recognised by its content, whatever its name)
-becomes Markdown, and a `.md` or `.markdown` file becomes a PDF. Any other file is refused.
+becomes Markdown, and a `.md` or `.markdown` file (in any case) becomes a PDF. Any other
+file is refused.
 
 - `kwamd report.pdf` writes `report.md` in the **current folder**.
 - `kwamd notes.md` writes `notes.pdf` in the **current folder**.
@@ -55,9 +57,10 @@ plus tables and strikethrough; raw HTML is shown as text. The PDF's title is the
 `#` heading, or the file name without its extension. YAML front matter at the top of
 the file is left out.
 
-- **Images:** local images (PNG, JPEG, GIF, BMP, TIFF, SVG) are embedded, with paths read
-  against the Markdown file's folder. Remote images are never downloaded, and an image
-  that can't be used shows its alt text; each case prints a warning, and the PDF is
+- **Images:** local images (PNG, JPEG, GIF and the other formats MuPDF reads, plus SVG)
+  are embedded, with paths read against the Markdown file's folder. Remote images are
+  never downloaded, and an image that can't be used shows its alt text instead. Remote
+  images share one warning; each image that can't be used gets its own. The PDF is
   still written.
 - **Links:** web (`http`, `https`), `mailto:` and `#heading` links are clickable. Any
   other link, such as a relative path or `file:`, appears as plain text.
