@@ -1,4 +1,5 @@
-"""Recognising and opening a Source: a PDF Source by content, a Markdown Source by extension."""
+"""Recognising and reading a Source: a PDF Source by content, a Markdown Source by
+extension (read as text, without its front matter)."""
 
 from collections.abc import Iterable
 from pathlib import Path
@@ -97,7 +98,7 @@ def source_kind(path: Path) -> SourceKind:
 
 
 def read_markdown_source(path: Path) -> str:
-    """Return the text of a Markdown Source."""
+    """Return the text of a Markdown Source, without its front matter."""
     try:
         content = path.read_bytes()
     except OSError as error:
@@ -106,9 +107,27 @@ def read_markdown_source(path: Path) -> str:
         text = content.decode("utf-8-sig")  # a leading byte-order mark is fine
     except UnicodeDecodeError:
         raise KwamdError(f"Source is not UTF-8 text: {path}") from None
+    text = _without_front_matter(text)
     if not text.strip():
         raise KwamdError(f"Source is empty: {path}")
     return text
+
+
+def _without_front_matter(markdown: str) -> str:
+    """``markdown`` without YAML front matter: when the first line is exactly
+    ``---``, everything up to and including the next such line. Without a
+    closing ``---`` it is returned whole.
+
+    Lines end only at ``\n`` (optionally after ``\r``), as in Markdown, not at
+    every character ``str.splitlines`` treats as a break.
+    """
+    lines = markdown.split("\n")
+    if lines[0].removesuffix("\r") != "---":
+        return markdown
+    for index, line in enumerate(lines[1:], start=1):
+        if line.removesuffix("\r") == "---":
+            return "\n".join(lines[index + 1 :])
+    return markdown
 
 
 def _read_failure(path: Path, error: OSError) -> KwamdError:

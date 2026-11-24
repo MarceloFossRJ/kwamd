@@ -20,6 +20,11 @@ from kwamd.mupdf import quiet_mupdf
 PAGE = pymupdf.paper_rect("a4")
 MARGIN = 72 * 2 / 2.54  # 2 cm in points
 CONTENT = pymupdf.Rect(MARGIN, MARGIN, PAGE.width - MARGIN, PAGE.height - MARGIN)
+PAGE_NUMBER_FONT = "tiro"  # MuPDF's built-in Times, to sit with the serif body
+PAGE_NUMBER_SIZE = 9
+PAGE_NUMBER_BASELINE = PAGE.height - MARGIN / 2 + PAGE_NUMBER_SIZE / 3
+"""Puts the number's middle in the middle of the bottom margin: a digit's
+middle sits about a third of the font size above its baseline."""
 
 # The one fixed look (see docs/specs/markdown-to-pdf/spec.md). MuPDF's default
 # serif is Charis SIL and its monospace is Nimbus Mono; its fallback fonts cover
@@ -70,6 +75,18 @@ _ADDRESS_SCHEME = re.compile(r"([a-z][a-z0-9+.-]+):", re.IGNORECASE)
 """An address scheme such as ``file:``; two letters at least, so ``C:`` isn't one."""
 
 
+@dataclass
+class _Parsed:
+    """A Markdown Source turned into what Story and the PDF need."""
+
+    html: str
+    images: dict[str, bytes]
+    """Image content by the name its ``src`` now uses."""
+    warnings: list[str]
+    title: str | None
+    """The first top-level heading as plain text, if there is one."""
+
+
 class _UnusableImage(Exception):
     """A local image that can't be embedded."""
 
@@ -86,21 +103,57 @@ def render_pdf(markdown: str, source_path: Path) -> Rendering:
     """
     quiet_mupdf()
     try:
-        html, images, warnings = _html(markdown, source_path.parent)
-        return Rendering(_layout(html, images), warnings)
+        parsed = _parse(markdown, source_path.parent)
+        pdf = _layout(parsed.html, parsed.images, parsed.title or source_path.stem)
+        return Rendering(pdf, parsed.warnings)
     except Exception as error:
         # Neither markdown-it-py nor Story documents its exception types, so
         # any failure is reported as the Source's.
         raise KwamdError(f"Cannot render Source {source_path}: {one_line(error)}") from None
 
 
-def _html(markdown: str, folder: Path) -> tuple[str, dict[str, bytes], list[str]]:
-    """The HTML for ``markdown``, the image files it refers to, and warnings."""
+def _parse(markdown: str, folder: Path) -> _Parsed:
     tokens = MARKDOWN.parse(markdown)
-    _vet_links(tokens, _add_heading_ids(tokens))
+    headings = _headings(tokens)
+    _vet_links(tokens, _add_heading_ids(headings))
     images, warnings = _collect_images(tokens, folder)
     html: str = MARKDOWN.renderer.render(tokens, MARKDOWN.options, {})
-    return html, images, warnings
+    return _Parsed(html, images, warnings, _title(headings))
+
+
+def _headings(tokens: list[Token]) -> list[tuple[Token, Token]]:
+    """Each heading's opening token and the inline token holding its text."""
+    return [
+        (opening, inline) for opening, inline in pairwise(tokens) if opening.type == "heading_open"
+    ]
+
+
+def _title(headings: list[tuple[Token, Token]]) -> str | None:
+    """The first non-empty top-level h1 (``#`` or setext ``===``) as plain
+    text. Headings in a quote or list don't count."""
+    for opening, inline in headings:
+        if opening.tag == "h1" and opening.level == 0 and (text := _plain_text(inline)):
+            return text
+    return None
+
+
+def _plain_text(inline: Token) -> str:
+    """An inline token's text without its formatting: an image counts as its
+    alt text (itself without formatting), and line breaks and runs of spaces
+    (no-break ones too) as one space."""
+    return " ".join(_text_parts(inline.children or []).split())
+
+
+def _text_parts(children: list[Token]) -> str:
+    parts = []
+    for child in children:
+        if child.type in ("text", "code_inline"):
+            parts.append(child.content)
+        elif child.type == "image":
+            parts.append(_text_parts(child.children or []))
+        elif child.type in ("softbreak", "hardbreak"):
+            parts.append(" ")
+    return "".join(parts)
 
 
 def _collect_images(tokens: list[Token], folder: Path) -> tuple[dict[str, bytes], list[str]]:
@@ -127,7 +180,7 @@ def _collect_images(tokens: list[Token], folder: Path) -> tuple[dict[str, bytes]
                 continue
         except _UnusableImage as unusable:
             warnings.append(one_line(unusable))
-        children[index] = Token("text", "", 0, content=image.content)  # its alt text
+        children[index] = Token("text", "", 0, content=_plain_text(image))  # its alt text
     if remote:
         warnings.append(
             f"remote images are not downloaded; showing alt text instead: {remote} image(s)"
@@ -190,20 +243,38 @@ def _inline_children(tokens: list[Token]) -> list[Token]:
     return [child for token in tokens for child in token.children or []]
 
 
-def _layout(html: str, images: dict[str, bytes]) -> bytes:
+def _layout(html: str, images: dict[str, bytes], title: str) -> bytes:
     archive = pymupdf.Archive()
     for name, content in images.items():
         archive.add((content, name))
     story = pymupdf.Story(html, user_css=STYLE, archive=archive)
     document = story.write_with_links(lambda _n, _filled: (PAGE, CONTENT, None))
     try:
+        _number_pages(document)
+        document.set_metadata({"title": title})
         pdf: bytes = document.tobytes()
         return pdf
     finally:
         document.close()
 
 
-def _add_heading_ids(tokens: list[Token]) -> set[str]:
+def _number_pages(document: pymupdf.Document) -> None:
+    """Draw each page's number, centred in the middle of the bottom margin."""
+    for index in range(document.page_count):
+        page = document.load_page(index)
+        number = str(index + 1)
+        width = pymupdf.get_text_length(
+            number, fontname=PAGE_NUMBER_FONT, fontsize=PAGE_NUMBER_SIZE
+        )
+        page.insert_text(
+            ((PAGE.width - width) / 2, PAGE_NUMBER_BASELINE),
+            number,
+            fontname=PAGE_NUMBER_FONT,
+            fontsize=PAGE_NUMBER_SIZE,
+        )
+
+
+def _add_heading_ids(headings: list[tuple[Token, Token]]) -> set[str]:
     """Give each heading the id GitHub would, so ``[x](#some-heading)`` links work.
 
     A repeated slug gets the lowest free ``-<n>``, skipping ids an earlier
@@ -211,10 +282,8 @@ def _add_heading_ids(tokens: list[Token]) -> set[str]:
     Returns the ids given.
     """
     ids: set[str] = set()
-    for opening, inline in pairwise(tokens):
-        if opening.type != "heading_open":
-            continue
-        slug = heading_id = _slug(inline.content)
+    for opening, inline in headings:
+        slug = heading_id = _slug(_plain_text(inline))
         n = 0
         while heading_id in ids:
             n += 1

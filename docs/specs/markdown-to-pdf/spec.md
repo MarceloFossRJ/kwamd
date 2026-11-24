@@ -24,7 +24,7 @@ Every Target rule, the stream contract and the exit codes from v1 carry over unc
 4. As a user, I want `NOTES.MD` and `notes.markdown` to count as Markdown, so that capitalisation and the long extension don't matter.
 5. As a user, I want a real PDF to convert to Markdown even when it is named `something.md`, so that content always wins for PDFs. Its default Target then gets a number, because the Source itself occupies `something.md`.
 6. As a user, I want a clear error when the Source is neither a PDF nor Markdown (e.g. `notes.txt`, a renamed `.docx`), so that I am not handed a strange PDF.
-7. As a user, I want a clear error when a Markdown Source is not valid UTF-8, or is empty or only whitespace, so that I am not given a blank or garbled PDF. A leading byte-order mark is fine.
+7. As a user, I want a clear error when a Markdown Source is not valid UTF-8, or is empty or only whitespace (front matter aside), so that I am not given a blank or garbled PDF. A leading byte-order mark is fine.
 8. As a user, I want headings, bold, italics, strikethrough, inline code, lists, block quotes, horizontal rules, code blocks and tables rendered, so that the PDF reflects the document's structure.
 9. As a user, I want links to be clickable, both web links and links to headings in the same document. A link to a heading that doesn't exist shows as plain text.
 10. As a user, I want raw HTML in the Markdown to appear as literal text, so that it can never quietly break the layout.
@@ -52,15 +52,16 @@ Every Target rule, the stream contract and the exit codes from v1 carry over unc
   - Flags: no styling or page-size flags.
 - **Images.**
   - Local image paths are resolved against the Source's folder. Paths outside it (`../`, absolute) are allowed, as in Pandoc: kwamd converts the person's own files, and only a file that really is an image is ever embedded; anything else yields just a warning naming the path. kwamd reads each image itself and serves it to `Story` from an in-memory `pymupdf.Archive`. PNG, JPEG, GIF, BMP, TIFF and SVG are embedded (WebP is not: MuPDF can't decode it); wide images are scaled to the text width (Story's default).
+  - An image shown as its alt text shows the alt text without its Markdown formatting.
   - Remote images (`http:`, `https:` in any case, or scheme-relative `//`) are replaced by their alt text, with one warning per run: `kwamd: warning: remote images are not downloaded; showing alt text instead: <n> image(s)`.
   - A local image that is missing, unreadable, or not a usable image (not an image at all, an unsupported format, or cut off) is replaced by its alt text, with one warning each naming the path (`image not found`, `cannot read image (<reason>)` or `not a usable image`, then `, showing alt text instead: <path>`).
   - Any other address with a scheme (`file:`, `data:`, `javascript:`, …) is replaced by its alt text, with one warning each: `unsupported image address, showing alt text instead: <scheme>:…`.
   - Warnings never change the exit code.
 - **Clickable links.** Only links to `http:`, `https:` and `mailto:` addresses, and to headings, are clickable. Any other link (a relative path such as `other.md`, `file:`, `data:`, `javascript:`) renders as plain text, so the PDF never carries an action that opens a local file or runs a script.
-- **Heading links.** Headings get GitHub's ids: a repeated slug takes the lowest free `-<n>`, skipping ids an earlier heading already took. A `#…` link matches after undoing percent-encoding and ignoring case, as GitHub does. A link to a missing heading (`[x](#nowhere)`) renders as plain text, silently, because Story cannot lay out a link to an id that doesn't exist.
+- **Heading links.** Headings get GitHub's ids, made from the heading's plain text (so `## See [docs](a.md)` is `see-docs`): a repeated slug takes the lowest free `-<n>`, skipping ids an earlier heading already took. A `#…` link matches after undoing percent-encoding and ignoring case, as GitHub does. A link to a missing heading (`[x](#nowhere)`) renders as plain text, silently, because Story cannot lay out a link to an id that doesn't exist.
 - **Page numbers.** A centred number at the bottom margin of every page, drawn after layout.
-- **Metadata.** PDF title is the text of the first `#` heading, else the Source's stem. No author.
-- **Front matter.** If the first line is exactly `---`, everything up to and including the next line that is exactly `---` is dropped before rendering. Without a closing `---`, nothing is dropped.
+- **Metadata.** PDF title is the first non-empty top-level `#` heading (ATX or setext; one inside a quote or list doesn't count) as plain text: formatting dropped, an image as its alt text (itself without formatting), line breaks and runs of spaces as one space. Else the Source's stem. No author.
+- **Front matter.** If the first line is exactly `---`, everything up to and including the next line that is exactly `---` is dropped before rendering (lines end at `\n` or `\r\n` only). Without a closing `---`, nothing is dropped. A Source that is only front matter fails as empty.
 - **Modules.**
   - *Source checking* gains the kind check and the Markdown Source (read, decode UTF-8 with an optional BOM, reject empty).
   - *Target resolution* takes the default extension from the kind.
