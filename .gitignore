@@ -1,6 +1,8 @@
 # Local sample PDFs used for manual testing
 test-files/
 
+.claude/settings.local.json
+
 # Logs
 *.log
 

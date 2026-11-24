@@ -19,3 +19,7 @@ kwamd talks to scripts as well as people, so every way a run can end is part of 
 - **Use glossary words in names.** Test names, ids and fixtures use Source, Target and Scanned Source (`GLOSSARY.md`).
 - **Read a PDF Target through the `tests/conftest.py` helpers** (`pdf_text`, `page_of`, `link_targets`, `link_pages`, `image_count`); their docstrings say which PyMuPDF quirks they absorb.
 - **Evidence shows each new test failing first.** The PR's Evidence lists every new test as `fail → pass`. A test written after its fix counts once it has been run with the fix undone; one that passes either way proves nothing.
+
+## Specs and decisions
+
+- **A recorded decision changes only with the user's sign-off.** When a PR edits a spec, issue or ADR so that a decision already recorded there changes (scope, a rule, an option it rejected), the commit message making that edit names the user's approval. Edits that add detail inside an agreed decision, or record a decision the user just made, need nothing extra. An edit that makes the docs match the code, without an approval, is a hard violation: the code changes instead, or the user decides.
