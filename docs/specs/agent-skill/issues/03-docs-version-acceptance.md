@@ -1,6 +1,6 @@
 # 03: Docs, version 0.3.0 and acceptance run
 
-Status: ready-for-human
+Status: resolved
 Blocked by: 01, 02
 
 ## Problem
@@ -16,3 +16,4 @@ Users need to learn the skill exists, the release needs its version, and the ski
 ## Comments
 
 - 2026-11-24: Version 0.3.0 and the README section landed on `feat/agent-skill`. `claude plugin validate` runs in CI (it needs no login). The six acceptance scenarios are still to be run by hand; record their results here, then set `Status: resolved`.
+- 2026-11-24: Resolved by the maintainer's decision, with the six acceptance scenarios **not yet run**. Run them after merging, and open a new issue for anything they turn up.
