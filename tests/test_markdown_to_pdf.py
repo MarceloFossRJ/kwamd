@@ -661,7 +661,7 @@ def test_image_path_with_a_line_break_gives_a_one_line_warning(
     assert line == "kwamd: warning: image not found, showing alt text instead: <tmp>/cwd/a b.png"
 
 
-def test_every_page_has_its_number_centred_in_the_bottom_margin(workdir: Path) -> None:
+def test_every_target_page_has_its_number_centred_in_the_bottom_margin(workdir: Path) -> None:
     source = workdir / "notes.md"
     source.write_text("# Long\n\n" + "A paragraph of filler text.\n\n" * 120, encoding="utf-8")
 
@@ -688,7 +688,7 @@ def test_every_page_has_its_number_centred_in_the_bottom_margin(workdir: Path) -
     ],
     ids=["first-h1", "no-h1"],
 )
-def test_pdf_title_is_first_top_level_heading_or_source_stem(
+def test_target_title_is_first_top_level_heading_or_source_stem(
     workdir: Path, markdown: str, title: str
 ) -> None:
     source = workdir / "meeting-notes.md"
@@ -702,7 +702,7 @@ def test_pdf_title_is_first_top_level_heading_or_source_stem(
 
 
 @pytest.mark.parametrize("newline", ["\n", "\r\n"], ids=["lf", "crlf"])
-def test_front_matter_is_left_out(workdir: Path, newline: str) -> None:
+def test_front_matter_is_left_out_of_the_target(workdir: Path, newline: str) -> None:
     source = workdir / "notes.md"
     lines = ["---", "title: Secret plan", "tags: [a, b]", "---", "", "# Visible", "", "Body."]
     source.write_bytes(newline.join(lines).encode("utf-8"))
@@ -721,10 +721,58 @@ def test_front_matter_is_left_out(workdir: Path, newline: str) -> None:
     ["---\ntitle: Kept\n\nNo closing line.\n", "\n---\ntitle: Kept\n---\n"],
     ids=["unclosed", "not-first-line"],
 )
-def test_text_that_is_not_front_matter_renders(workdir: Path, markdown: str) -> None:
+def test_markdown_that_is_not_front_matter_stays_in_the_target(
+    workdir: Path, markdown: str
+) -> None:
     source = workdir / "notes.md"
     source.write_text(markdown, encoding="utf-8")
 
     assert main([str(source)]) == 0
 
     assert "title: Kept" in pdf_text(workdir / "notes.pdf")
+
+
+def test_markdown_source_with_only_front_matter_fails_as_empty(
+    workdir: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    source = workdir / "notes.md"
+    source.write_text("---\ntitle: Draft\n---\n\n  \n", encoding="utf-8")
+
+    exit_code = main([str(source)])
+
+    assert exit_code == 1
+    assert_failed_with_one_line(capsys, workdir, "Source is empty", "notes.md", target_glob="*.pdf")
+
+
+def test_front_matter_ends_only_at_a_real_line_break(workdir: Path) -> None:
+    source = workdir / "notes.md"
+    # A form feed is a line break to Python's splitlines, but not to Markdown.
+    source.write_text("---\nnote: a\f---\nkey: hidden\n---\nBody.\n", encoding="utf-8")
+
+    assert main([str(source)]) == 0
+
+    text = pdf_text(workdir / "notes.pdf")
+    assert "Body." in text
+    assert "hidden" not in text
+
+
+@pytest.mark.parametrize(
+    ("markdown", "title"),
+    [
+        ("# Tom ![a portrait](x.png) and   Jerry\n", "Tom a portrait and Jerry"),
+        ("Two line\nsetext\n===\n", "Two line setext"),
+        ("# Price 5\u00a0EUR\n", "Price 5 EUR"),
+        ("> # Quoted\n\n- # In a list\n\n# Real title\n", "Real title"),
+    ],
+    ids=["image-alt", "setext-two-lines", "no-break-space", "top-level-only"],
+)
+def test_target_title_is_the_heading_as_plain_text(
+    workdir: Path, markdown: str, title: str
+) -> None:
+    source = workdir / "notes.md"
+    source.write_text(markdown, encoding="utf-8")
+
+    assert main([str(source)]) == 0
+
+    with pymupdf.open(workdir / "notes.pdf") as doc:
+        assert doc.metadata["title"] == title
