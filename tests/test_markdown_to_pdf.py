@@ -1,5 +1,6 @@
 """Behaviour of ``kwamd`` for a Markdown Source, tested through ``main(argv)``."""
 
+import os
 import unicodedata
 from collections.abc import Callable
 from pathlib import Path
@@ -475,7 +476,7 @@ def test_local_image_is_embedded(
     target = workdir / "notes.pdf"
     assert _image_count(target) == 1
     assert "A chart" not in pdf_text(target)
-    assert capsys.readouterr().err == ""
+    assert stderr_lines(capsys.readouterr().err, tmp_path) == []
 
 
 def test_remote_images_show_alt_text_with_one_warning(
@@ -534,6 +535,7 @@ def test_unusable_local_image_shows_alt_text_with_a_warning(
     assert _image_count(target) == 0
 
 
+@pytest.mark.skipif(os.geteuid() == 0, reason="root can read a file with no permissions")
 def test_unreadable_local_image_shows_alt_text_with_a_warning(
     workdir: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -565,4 +567,57 @@ def test_svg_image_is_embedded(workdir: Path, capsys: pytest.CaptureFixture[str]
     assert main([str(source)]) == 0
 
     assert _image_count(workdir / "notes.pdf") == 1
-    assert capsys.readouterr().err == ""
+    assert stderr_lines(capsys.readouterr().err, workdir.parent) == []
+
+
+def test_truncated_image_shows_alt_text_with_a_warning(
+    workdir: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    image = _write_png(workdir / "chart.png")
+    image.write_bytes(image.read_bytes()[:60])
+    source = workdir / "notes.md"
+    source.write_text("![Sales chart](chart.png)\n", encoding="utf-8")
+
+    assert main([str(source)]) == 0
+
+    assert stderr_lines(capsys.readouterr().err, workdir.parent) == [
+        "kwamd: warning: damaged image, showing alt text instead: <tmp>/cwd/chart.png"
+    ]
+    assert _image_count(workdir / "notes.pdf") == 0
+
+
+@pytest.mark.parametrize(
+    "address", ["HTTPS://example.org/a.png", "Http://example.org/b.png", "//example.org/c.png"]
+)
+def test_remote_image_addresses_match_any_case_and_scheme_relative(
+    workdir: Path, capsys: pytest.CaptureFixture[str], address: str
+) -> None:
+    source = workdir / "notes.md"
+    source.write_text(f"![Photo]({address})\n", encoding="utf-8")
+
+    assert main([str(source)]) == 0
+
+    assert stderr_lines(capsys.readouterr().err, workdir.parent) == [
+        "kwamd: warning: remote images are not downloaded; showing alt text instead: 1 image(s)"
+    ]
+    assert "Photo" in pdf_text(workdir / "notes.pdf")
+
+
+@pytest.mark.parametrize(
+    "address", ["file:///etc/hosts", "data:image/png;base64,iVBORw0KGgo="], ids=["file", "data"]
+)
+def test_unsupported_image_address_shows_alt_text_with_a_warning(
+    workdir: Path, capsys: pytest.CaptureFixture[str], address: str
+) -> None:
+    source = workdir / "notes.md"
+    source.write_text(f"![Diagram]({address})\n", encoding="utf-8")
+
+    assert main([str(source)]) == 0
+
+    scheme = address.split(":")[0]
+    assert stderr_lines(capsys.readouterr().err, workdir.parent) == [
+        f"kwamd: warning: unsupported image address, showing alt text instead: {scheme}:…"
+    ]
+    text = pdf_text(workdir / "notes.pdf")
+    assert "Diagram" in text
+    assert "](" not in text

@@ -5,13 +5,14 @@ This is the only module that knows about markdown-it-py and PyMuPDF's Story
 """
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from itertools import pairwise
 from pathlib import Path
 from urllib.parse import unquote
 
 import pymupdf
 from markdown_it import MarkdownIt
+from markdown_it.common.normalize_url import validateLink
 from markdown_it.token import Token
 
 from kwamd.errors import KwamdError, one_line
@@ -36,8 +37,20 @@ th, td { border: 0.5pt solid #888888; padding: 3pt 6pt; }
 blockquote { border-left: 3pt solid #bbbbbb; padding-left: 8pt; margin-left: 0; }
 """
 
+
+class _Markdown(MarkdownIt):
+    """markdown-it, but letting ``file:`` and ``data:`` addresses through.
+
+    markdown-it drops them before kwamd sees them, leaving the raw Markdown as
+    text; let through, an image with one can show its alt text instead.
+    """
+
+    def validateLink(self, url: str) -> bool:
+        return validateLink(url) or url.strip().lower().startswith(("file:", "data:"))
+
+
 # Raw HTML is shown as text: Story supports only part of HTML (ADR 0002).
-MARKDOWN = MarkdownIt("commonmark", {"html": False}).enable(["table", "strikethrough"])
+MARKDOWN = _Markdown("commonmark", {"html": False}).enable(["table", "strikethrough"])
 
 
 @dataclass
@@ -48,51 +61,52 @@ class Rendering:
     warnings: list[str]
 
 
-@dataclass
-class _Images:
-    """The images a Markdown Source refers to, as Story will need them."""
-
-    files: dict[str, bytes] = field(default_factory=dict)
-    """Image content by the name its ``src`` now uses."""
-    warnings: list[str] = field(default_factory=list)
+REMOTE = re.compile(r"(https?:)?//", re.IGNORECASE)
+SCHEME = re.compile(r"([a-z][a-z0-9+.-]+):", re.IGNORECASE)
+"""An address scheme such as ``file:``; two letters at least, so ``C:`` isn't one."""
 
 
-REMOTE_PREFIXES = ("http://", "https://")
+class _UnusableImage(Exception):
+    """A local image that can't be embedded; the message says why."""
 
 
 def render_pdf(markdown: str, source_path: Path) -> Rendering:
     """Render the Markdown Source text ``markdown`` as a PDF.
 
-    Relative image paths are read against the Source's folder.
+    Relative image paths are read against the Source's folder. An image that
+    can't be embedded never fails the run: it shows its alt text, and the
+    returned ``Rendering.warnings`` say why.
     """
     quiet_mupdf()
     try:
-        html, images = _html(markdown, source_path.parent)
-        return Rendering(_layout(html, images.files), images.warnings)
+        html, images, warnings = _html(markdown, source_path.parent)
+        return Rendering(_layout(html, images), warnings)
     except Exception as error:
         # Neither markdown-it-py nor Story documents its exception types, so
         # any failure is reported as the Source's.
         raise KwamdError(f"Cannot render Source {source_path}: {one_line(error)}") from None
 
 
-def _html(markdown: str, folder: Path) -> tuple[str, _Images]:
-    """The HTML for ``markdown``, and the images it refers to."""
+def _html(markdown: str, folder: Path) -> tuple[str, dict[str, bytes], list[str]]:
+    """The HTML for ``markdown``, the image files it refers to, and warnings."""
     tokens = MARKDOWN.parse(markdown)
     _resolve_anchor_links(tokens, _add_heading_ids(tokens))
-    images = _collect_images(tokens, folder)
+    images, warnings = _collect_images(tokens, folder)
     html: str = MARKDOWN.renderer.render(tokens, MARKDOWN.options, {})
-    return html, images
+    return html, images, warnings
 
 
-def _collect_images(tokens: list[Token], folder: Path) -> _Images:
-    """Read each local image, relative to ``folder``, and point its ``src`` at
-    a name Story can find in the archive. Story's own archive of the folder
-    can't reach images outside it, such as ``../shared/chart.png``.
+def _collect_images(tokens: list[Token], folder: Path) -> tuple[dict[str, bytes], list[str]]:
+    """Read each local image and point its ``src`` at a name in the archive.
 
-    A remote image is never downloaded, and a local one that can't be used is
-    skipped: both are replaced by their alt text, with a warning.
+    Paths are read against ``folder``; ``../`` and absolute paths are allowed,
+    which Story's own archive of the folder couldn't reach. An image that is
+    remote (never downloaded), has an unsupported address, or can't be read
+    is replaced by its alt text, with a warning. Returns the image content by
+    name, and the warnings.
     """
-    images = _Images()
+    images: dict[str, bytes] = {}
+    warnings: list[str] = []
     remote = 0
     for token in tokens:
         children = token.children or []
@@ -100,36 +114,44 @@ def _collect_images(tokens: list[Token], folder: Path) -> _Images:
             src = child.attrGet("src")
             if child.type != "image" or not isinstance(src, str):
                 continue
-            if src.startswith(REMOTE_PREFIXES):
+            problem = where = ""
+            if REMOTE.match(src):
                 remote += 1
-                children[index] = _alt_text(child)
-                continue
-            path = folder / unquote(src)
-            content, problem = _read_image(path)
-            if content is None:
-                images.warnings.append(f"{problem}, showing alt text instead: {path}")
-                children[index] = _alt_text(child)
-                continue
-            name = f"image-{len(images.files)}{path.suffix}"
-            images.files[name] = content
-            child.attrSet("src", name)
+            elif scheme := SCHEME.match(src):
+                problem, where = "unsupported image address", f"{scheme.group(1)}:…"
+            else:
+                path = folder / unquote(src)
+                try:
+                    content = _read_image(path)
+                except _UnusableImage as unusable:
+                    problem, where = str(unusable), str(path)
+                else:
+                    name = f"image-{len(images)}{path.suffix}"
+                    images[name] = content
+                    child.attrSet("src", name)
+                    continue
+            # Shown as its alt text instead.
+            children[index] = Token("text", "", 0, content=child.content)
+            if problem:
+                warnings.append(f"{problem}, showing alt text instead: {where}")
     if remote:
-        images.warnings.append(
+        warnings.append(
             f"remote images are not downloaded; showing alt text instead: {remote} image(s)"
         )
-    return images
+    return images, warnings
 
 
-def _read_image(path: Path) -> tuple[bytes | None, str]:
-    """The content of the image at ``path``, or ``None`` and why it can't be used."""
+def _read_image(path: Path) -> bytes:
+    """The content of the image at ``path``, or ``_UnusableImage`` saying why not."""
     if not path.exists():
-        return None, "image not found"
+        raise _UnusableImage("image not found")
     if path.is_dir():
-        return None, "not an image"
+        raise _UnusableImage("not an image")
     try:
         content = path.read_bytes()
     except OSError as error:
-        return None, f"cannot read image ({error.strerror})"
+        raise _UnusableImage(f"cannot read image ({error.strerror or error})") from None
+    pymupdf.TOOLS.mupdf_warnings(reset=True)
     try:
         if path.suffix.lower() == ".svg":
             pymupdf.open(stream=content, filetype="svg").close()
@@ -137,13 +159,11 @@ def _read_image(path: Path) -> tuple[bytes | None, str]:
             pymupdf.Pixmap(content)
     except Exception:
         # PyMuPDF documents no exception type for an unknown image format.
-        return None, "not an image"
-    return content, ""
-
-
-def _alt_text(image: Token) -> Token:
-    """A text token holding ``image``'s alt text, to show in its place."""
-    return Token("text", "", 0, content=image.content)
+        raise _UnusableImage("not an image") from None
+    # MuPDF decodes a cut-off image with only a warning, padding the rest.
+    if pymupdf.TOOLS.mupdf_warnings(reset=True):
+        raise _UnusableImage("damaged image")
+    return content
 
 
 def _inline_children(tokens: list[Token]) -> list[Token]:
