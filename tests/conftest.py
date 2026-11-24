@@ -85,3 +85,26 @@ def stderr_lines(err: str, tmp_path: Path) -> list[str]:
     ``"scanned" in line`` would also match a test whose name says "scanned".
     """
     return err.replace(str(tmp_path), "<tmp>").splitlines()
+
+
+@pytest.fixture
+def workdir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """A fresh current folder for the run, inside ``tmp_path``."""
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    monkeypatch.chdir(cwd)
+    return cwd
+
+
+def assert_failed_with_one_line(
+    capsys: pytest.CaptureFixture[str], workdir: Path, *fragments: str, target_glob: str = "*.md"
+) -> None:
+    """Check the run failed with one ``kwamd: error:`` line containing ``fragments``,
+    printed nothing on stdout, and left no Target matching ``target_glob`` behind."""
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    [line] = stderr_lines(captured.err, workdir.parent)
+    assert line.startswith("kwamd: error: ")
+    for fragment in fragments:
+        assert fragment in line
+    assert not list(workdir.glob(target_glob))

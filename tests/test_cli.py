@@ -9,15 +9,7 @@ import pytest
 
 from kwamd import main
 
-from .conftest import MakeSource, stderr_lines
-
-
-@pytest.fixture
-def workdir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    cwd = tmp_path / "cwd"
-    cwd.mkdir()
-    monkeypatch.chdir(cwd)
-    return cwd
+from .conftest import MakeSource, assert_failed_with_one_line, stderr_lines
 
 
 def test_default_target_is_source_stem_in_current_folder(
@@ -128,26 +120,14 @@ def test_target_in_missing_folder_fails_without_creating_it(
 
     assert exit_code == 1
     assert not (workdir / "missing").exists()
-    _assert_failed_with_one_line(capsys, workdir, "folder does not exist", "missing")
-
-
-def _assert_failed_with_one_line(
-    capsys: pytest.CaptureFixture[str], workdir: Path, *fragments: str
-) -> None:
-    captured = capsys.readouterr()
-    assert captured.out == ""
-    [line] = stderr_lines(captured.err, workdir.parent)
-    assert line.startswith("kwamd: error: ")
-    for fragment in fragments:
-        assert fragment in line
-    assert not list(workdir.glob("*.md"))
+    assert_failed_with_one_line(capsys, workdir, "folder does not exist", "missing")
 
 
 def test_missing_source_fails(workdir: Path, capsys: pytest.CaptureFixture[str]) -> None:
     exit_code = main(["nope.pdf"])
 
     assert exit_code == 1
-    _assert_failed_with_one_line(capsys, workdir, "does not exist", "nope.pdf")
+    assert_failed_with_one_line(capsys, workdir, "does not exist", "nope.pdf")
 
 
 @pytest.mark.parametrize(
@@ -155,7 +135,7 @@ def test_missing_source_fails(workdir: Path, capsys: pytest.CaptureFixture[str])
     [b"PK\x03\x04 this is really a docx", b"just some text\n", b""],
     ids=["zip", "text", "empty-file"],
 )
-def test_source_that_is_not_a_pdf_fails(
+def test_source_that_is_neither_pdf_nor_markdown_fails(
     workdir: Path, capsys: pytest.CaptureFixture[str], content: bytes
 ) -> None:
     fake = workdir / "fake.pdf"
@@ -164,7 +144,7 @@ def test_source_that_is_not_a_pdf_fails(
     exit_code = main([str(fake)])
 
     assert exit_code == 1
-    _assert_failed_with_one_line(capsys, workdir, "not a PDF", "fake.pdf")
+    assert_failed_with_one_line(capsys, workdir, "neither a PDF nor Markdown", "fake.pdf")
 
 
 def test_real_pdf_without_pdf_extension_is_accepted(workdir: Path, make_source: MakeSource) -> None:
@@ -273,7 +253,7 @@ def test_password_protected_source_fails_without_a_terminal_to_ask(
     exit_code = main([str(source)])
 
     assert exit_code == 1
-    _assert_failed_with_one_line(capsys, workdir, "password-protected", "terminal", "secret.pdf")
+    assert_failed_with_one_line(capsys, workdir, "password-protected", "terminal", "secret.pdf")
 
 
 def test_source_with_only_an_owner_password_converts_without_asking(
@@ -303,7 +283,7 @@ def test_source_with_no_pages_fails(workdir: Path, capsys: pytest.CaptureFixture
     exit_code = main([str(source)])
 
     assert exit_code == 1
-    _assert_failed_with_one_line(capsys, workdir, "no pages", "blank.pdf")
+    assert_failed_with_one_line(capsys, workdir, "no pages", "blank.pdf")
 
 
 @pytest.mark.parametrize(
@@ -426,7 +406,7 @@ def test_unwritable_target_folder_fails(
         locked.chmod(0o700)
 
     assert exit_code == 1
-    _assert_failed_with_one_line(capsys, workdir, "Cannot write Target")
+    assert_failed_with_one_line(capsys, workdir, "Cannot write Target")
     assert not list(locked.iterdir())
 
 
@@ -439,7 +419,7 @@ def test_missing_folder_target_with_trailing_slash_fails(
 
     assert exit_code == 1
     assert not (workdir / "nope").exists()
-    _assert_failed_with_one_line(capsys, workdir, "folder does not exist", "nope")
+    assert_failed_with_one_line(capsys, workdir, "folder does not exist", "nope")
 
 
 def test_scanned_source_warning_is_not_shown_when_the_conversion_fails(
@@ -460,7 +440,7 @@ def test_folder_given_as_source_fails(workdir: Path, capsys: pytest.CaptureFixtu
     exit_code = main(["papers"])
 
     assert exit_code == 1
-    _assert_failed_with_one_line(capsys, workdir, "is a folder", "papers")
+    assert_failed_with_one_line(capsys, workdir, "is a folder", "papers")
 
 
 def test_unreadable_source_fails(
@@ -474,7 +454,7 @@ def test_unreadable_source_fails(
         source.chmod(0o600)
 
     assert exit_code == 1
-    _assert_failed_with_one_line(capsys, workdir, "Cannot read Source", "report.pdf")
+    assert_failed_with_one_line(capsys, workdir, "Cannot read Source", "report.pdf")
 
 
 @pytest.mark.parametrize(
@@ -522,7 +502,7 @@ def test_conversion_failure_fails_with_one_line_and_leaves_no_target(
     exit_code = main([str(source)])
 
     assert exit_code == 1
-    _assert_failed_with_one_line(capsys, workdir, "Cannot convert Source", "report.pdf")
+    assert_failed_with_one_line(capsys, workdir, "Cannot convert Source", "report.pdf")
 
 
 def test_markdown_that_cannot_be_encoded_fails_and_leaves_no_target(
@@ -538,7 +518,7 @@ def test_markdown_that_cannot_be_encoded_fails_and_leaves_no_target(
     exit_code = main([str(source)])
 
     assert exit_code == 1
-    _assert_failed_with_one_line(capsys, workdir, "Cannot write Target", "report.md")
+    assert_failed_with_one_line(capsys, workdir, "Cannot write Target", "report.md")
 
 
 @pytest.mark.parametrize("argv", [["report.pdf", ""], [""]], ids=["empty-target", "empty-source"])
@@ -584,7 +564,7 @@ def test_multiline_conversion_error_is_reported_on_one_line(
     exit_code = main([str(source)])
 
     assert exit_code == 1
-    _assert_failed_with_one_line(capsys, workdir, "Cannot convert Source", "first line")
+    assert_failed_with_one_line(capsys, workdir, "Cannot convert Source", "first line")
 
 
 def test_trailing_slash_on_an_existing_file_says_it_is_not_a_folder(

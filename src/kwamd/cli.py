@@ -14,7 +14,8 @@ from pathlib import Path
 
 from kwamd.conversion import convert
 from kwamd.errors import KwamdError
-from kwamd.source import open_source
+from kwamd.rendering import render_pdf
+from kwamd.source import TARGET_SUFFIX, open_source, read_markdown_source, source_kind
 from kwamd.target import resolve_target, write_target
 
 PASSWORD_ATTEMPTS = 3
@@ -62,8 +63,14 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 def _run(source_path: Path, requested_target: str | None) -> Path:
-    # Check the Target first, so nobody types a password only to hit a bad path.
-    target = resolve_target(source_path, requested_target, Path.cwd())
+    kind = source_kind(source_path)
+    # Check the Target before opening the Source, so nobody types a password
+    # only to hit a bad path.
+    target = resolve_target(source_path, requested_target, Path.cwd(), TARGET_SUFFIX[kind])
+    if kind == "markdown":
+        markdown = read_markdown_source(source_path)
+        write_target(target, render_pdf(markdown, source_path))
+        return target
     with open_source(source_path, _passwords_from_prompt(source_path)) as source:
         write_target(target, convert(source))
         if source.scanned:

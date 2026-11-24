@@ -1,13 +1,14 @@
-"""Opening a Source, judged by content, never by extension."""
+"""Recognising and opening a Source: a PDF Source by content, a Markdown Source by extension."""
 
 from collections.abc import Iterable
 from pathlib import Path
 from types import TracebackType
-from typing import Self
+from typing import Literal, Self
 
 import pymupdf
 
 from kwamd.errors import KwamdError
+from kwamd.mupdf import quiet_mupdf
 
 
 class Source:
@@ -36,22 +37,13 @@ class Source:
 
 
 def open_source(path: Path, passwords: Iterable[str]) -> Source:
-    """Open ``path`` as a Source, or raise ``KwamdError`` saying why it cannot be converted.
+    """Open the PDF Source at ``path``, or raise ``KwamdError`` saying why it cannot be converted.
 
+    ``path`` has already passed ``source_kind``, so it is a readable file.
     ``passwords`` is only consumed for a password-protected Source: each one is
     tried in turn until one opens it. It may be lazy (e.g. prompting a person).
     """
-    if path.is_dir():
-        raise KwamdError(f"Source is a folder, not a PDF: {path}")
-    if not path.exists():
-        raise KwamdError(f"Source does not exist: {path}")
-    try:
-        path.open("rb").close()
-    except OSError as error:
-        raise KwamdError(f"Cannot read Source {path}: {error.strerror}") from None
-
-    # MuPDF otherwise prints its own diagnostics to stderr for unreadable files.
-    pymupdf.TOOLS.mupdf_display_errors(False)
+    quiet_mupdf()
     try:
         document = pymupdf.open(path)
     except pymupdf.FileDataError:
@@ -67,3 +59,57 @@ def open_source(path: Path, passwords: Iterable[str]) -> Source:
     except BaseException:
         document.close()
         raise
+
+
+type SourceKind = Literal["pdf", "markdown"]
+
+TARGET_SUFFIX: dict[SourceKind, str] = {"pdf": ".md", "markdown": ".pdf"}
+"""The default Target's extension for each kind of Source."""
+
+MARKDOWN_SUFFIXES = (".md", ".markdown")
+PDF_SIGNATURE = b"%PDF-"
+SIGNATURE_WINDOW = 1024
+"""PDF readers accept a signature anywhere in the first kilobyte."""
+
+
+def source_kind(path: Path) -> SourceKind:
+    """Say which kind of Source ``path`` is, without opening it as a document.
+
+    A PDF Source is known by its content, a Markdown Source by its extension.
+    """
+    if path.is_dir():
+        raise KwamdError(f"Source is a folder, not a PDF: {path}")
+    if not path.exists():
+        raise KwamdError(f"Source does not exist: {path}")
+    try:
+        with path.open("rb") as file:
+            head = file.read(SIGNATURE_WINDOW)
+    except OSError as error:
+        raise _read_failure(path, error) from None
+    is_markdown_name = path.suffix.lower() in MARKDOWN_SUFFIXES
+    # Markdown can mention "%PDF-" in its text, so a Markdown-named file only
+    # counts as a PDF when the signature is its very first bytes (ADR 0001).
+    if head.startswith(PDF_SIGNATURE) or (not is_markdown_name and PDF_SIGNATURE in head):
+        return "pdf"
+    if is_markdown_name:
+        return "markdown"
+    raise KwamdError(f"Source is neither a PDF nor Markdown: {path}")
+
+
+def read_markdown_source(path: Path) -> str:
+    """Return the text of a Markdown Source."""
+    try:
+        content = path.read_bytes()
+    except OSError as error:
+        raise _read_failure(path, error) from None
+    try:
+        text = content.decode("utf-8-sig")  # a leading byte-order mark is fine
+    except UnicodeDecodeError:
+        raise KwamdError(f"Source is not UTF-8 text: {path}") from None
+    if not text.strip():
+        raise KwamdError(f"Source is empty: {path}")
+    return text
+
+
+def _read_failure(path: Path, error: OSError) -> KwamdError:
+    return KwamdError(f"Cannot read Source {path}: {error.strerror}")
