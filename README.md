@@ -1,7 +1,10 @@
 # kwamd
 
-A command-line tool that converts a PDF document into a Markdown file, using
-[PyMuPDF4LLM](https://github.com/pymupdf/pymupdf4llm).
+A command-line tool that converts a PDF document into a Markdown file, or a Markdown file
+into a PDF document. It uses [PyMuPDF4LLM](https://github.com/pymupdf/pymupdf4llm) for PDF to
+Markdown, and [markdown-it-py](https://github.com/executablebooks/markdown-it-py) with
+[PyMuPDF](https://github.com/pymupdf/PyMuPDF) (which comes with PyMuPDF4LLM) for Markdown
+to PDF.
 
 ## Install
 
@@ -23,22 +26,44 @@ After pulling new changes, reinstall with `uv tool install --reinstall .`. To re
 kwamd <source> [target]
 ```
 
+The Source decides the direction: a PDF (recognised by its content, whatever its name)
+becomes Markdown, and a `.md` or `.markdown` file (in any case) becomes a PDF. Any other
+file is refused.
+
 - `kwamd report.pdf` writes `report.md` in the **current folder**.
-- `kwamd report.pdf notes.md` writes `notes.md` (the path is used exactly as given).
-- `kwamd report.pdf some/folder/` writes `some/folder/report.md`.
+- `kwamd notes.md` writes `notes.pdf` in the **current folder**.
+- `kwamd report.pdf summary.md` writes `summary.md` (the path is used exactly as given).
+- `kwamd notes.md some/folder/` writes `some/folder/notes.pdf`.
 
 kwamd never overwrites a file: if the Target exists, it writes `report (1).md`,
 `report (2).md`, … using the lowest free number. On success it prints the path
 it wrote to stdout, as an absolute path; warnings and errors go to stderr.
 Relative paths are read against the current folder.
 
+Exit codes: `0` success, `1` Source or Target problem, `2` wrong usage, `130` interrupted (Ctrl-C).
+
+### PDF to Markdown
+
 For a password-protected PDF, kwamd asks for the password at the terminal
 (hidden input, three attempts). Without a terminal it fails.
 
-Exit codes: `0` success, `1` Source or Target problem, `2` wrong usage, `130` interrupted (Ctrl-C).
-
 A Scanned Source (pages that are only images) is converted with a warning; OCR is
 not supported yet. Images are not extracted.
+
+### Markdown to PDF
+
+The PDF is A4 with 2 cm margins, page numbers, and one fixed look. It renders CommonMark
+plus tables and strikethrough; raw HTML is shown as text. The PDF's title is the first
+`#` heading, or the file name without its extension. YAML front matter at the top of
+the file is left out.
+
+- **Images:** local images (PNG, JPEG, GIF and the other formats PyMuPDF reads, plus SVG)
+  are embedded, with paths read against the Markdown file's folder. Remote images are
+  never downloaded, and an image that can't be used shows its alt text instead. Remote
+  images share one warning; each image that can't be used gets its own. The PDF is
+  still written.
+- **Links:** web (`http`, `https`), `mailto:` and `#heading` links are clickable. Any
+  other link, such as a relative path or `file:`, appears as plain text.
 
 ## Development
 

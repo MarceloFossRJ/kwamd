@@ -30,15 +30,18 @@ def _non_empty(value: str) -> str:
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="kwamd",
-        description="Convert a PDF document into a Markdown file.",
+        description="Convert a PDF to Markdown, or Markdown to a PDF.",
         allow_abbrev=False,
     )
-    parser.add_argument("source", type=_non_empty, help="the PDF to convert")
+    parser.add_argument("source", type=_non_empty, help="the PDF or Markdown file to convert")
     parser.add_argument(
         "target",
         type=_non_empty,
         nargs="?",
-        help="where to write the Markdown (default: <source name>.md in the current folder)",
+        help=(
+            "where to write the result (default, in the current folder: "
+            "<source name>.md for a PDF, <source name>.pdf for Markdown)"
+        ),
     )
     parser.add_argument("--version", action="version", version=f"%(prog)s {version('kwamd')}")
     return parser

@@ -87,6 +87,12 @@ class _Parsed:
     """The first top-level heading as plain text, if there is one."""
 
 
+_MISSING_PIXELS = re.compile(
+    r"missing pixel data|premature end|padding truncated|end of file", re.IGNORECASE
+)
+"""MuPDF warnings meaning an image was cut off and its pixels padded."""
+
+
 class _UnusableImage(Exception):
     """A local image that can't be embedded."""
 
@@ -221,11 +227,13 @@ def _local_image(src: str, folder: Path) -> bytes:
 
 
 def _decodes_cleanly(content: bytes, svg: bool) -> bool:
-    """Whether MuPDF decodes ``content`` as an image without complaint.
+    """Whether MuPDF decodes ``content`` as a whole image.
 
     MuPDF decodes some cut-off images with only a warning, padding the rest,
-    so its warning log is cleared first and checked after. Nothing else
-    decodes in between, because kwamd does one thing at a time.
+    so its warning log is cleared first and checked after for warnings that
+    mean pixel data is missing. Harmless warnings, such as an unsupported GIF
+    extension, don't count. Nothing else decodes in between, because kwamd
+    does one thing at a time.
     """
     pymupdf.TOOLS.mupdf_warnings(reset=True)
     try:
@@ -236,7 +244,7 @@ def _decodes_cleanly(content: bytes, svg: bool) -> bool:
     except Exception:
         # PyMuPDF documents no exception type for an unknown or broken image.
         return False
-    return not pymupdf.TOOLS.mupdf_warnings(reset=True)
+    return not _MISSING_PIXELS.search(pymupdf.TOOLS.mupdf_warnings(reset=True))
 
 
 def _inline_children(tokens: list[Token]) -> list[Token]:
