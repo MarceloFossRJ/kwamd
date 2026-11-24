@@ -1,6 +1,6 @@
 # 02: Plugin version check
 
-Status: ready-for-agent
+Status: resolved
 Blocked by: 01
 
 ## Problem

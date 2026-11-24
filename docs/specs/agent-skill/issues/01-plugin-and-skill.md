@@ -1,6 +1,6 @@
 # 01: Plugin and skill
 
-Status: ready-for-agent
+Status: resolved
 
 ## Problem
 
