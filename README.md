@@ -3,6 +3,20 @@
 A command-line tool that converts a PDF document into a Markdown file, using
 [PyMuPDF4LLM](https://github.com/pymupdf/pymupdf4llm).
 
+## Install
+
+kwamd installs with [uv](https://docs.astral.sh/uv/). From a clone of this repository:
+
+```sh
+uv tool install .
+```
+
+This puts `kwamd` in `~/.local/bin`. uv fetches the required Python (3.14) itself. If your
+shell then says `command not found: kwamd`, run `uv tool update-shell` and open a new terminal.
+
+After pulling new changes, reinstall with `uv tool install --reinstall .`. To remove it:
+`uv tool uninstall kwamd`.
+
 ## Usage
 
 ```sh
@@ -32,6 +46,12 @@ Every clone needs the git hooks installed once:
 
 ```sh
 uv run pre-commit install
+```
+
+To have `kwamd` on your PATH always run your working tree, install it in editable mode:
+
+```sh
+uv tool install --editable .
 ```
 
 The hook blocks commits to `main` and runs the same checks as CI. To run them on demand:
