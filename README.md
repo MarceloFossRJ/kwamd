@@ -11,8 +11,8 @@ kwamd installs with [uv](https://docs.astral.sh/uv/). From a clone of this repos
 uv tool install .
 ```
 
-This puts `kwamd` in `~/.local/bin`. uv fetches the required Python (3.14) itself. If your
-shell then says `command not found: kwamd`, run `uv tool update-shell` and open a new terminal.
+This puts `kwamd` in uv's tool folder, `~/.local/bin` by default (`uv tool dir --bin` shows
+it). uv fetches the required Python (3.14) itself. If your shell then says `command not found: kwamd`, run `uv tool update-shell` and open a new terminal.
 
 After pulling new changes, reinstall with `uv tool install --reinstall .`. To remove it:
 `uv tool uninstall kwamd`.
@@ -48,12 +48,6 @@ Every clone needs the git hooks installed once:
 uv run pre-commit install
 ```
 
-To have `kwamd` on your PATH always run your working tree, install it in editable mode:
-
-```sh
-uv tool install --editable .
-```
-
 The hook blocks commits to `main` and runs the same checks as CI. To run them on demand:
 
 ```sh
@@ -62,6 +56,12 @@ uv run ruff check
 uv run ruff format --check
 uv run mypy
 uv run pytest
+```
+
+To have `kwamd` on your PATH always run your working tree, install it in editable mode:
+
+```sh
+uv tool install --editable .
 ```
 
 ## License

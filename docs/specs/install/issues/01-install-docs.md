@@ -13,7 +13,7 @@ fails with `command not found` (made worse by the easy typo `kwand`).
 - This is an install/documentation gap; the conversion code does not change.
 - Supported install: `uv tool install .` (user) and `uv tool install --editable .` (developer).
 - No `kwand` alias: `kwamd` is the only command name.
-- `uv.lock` stays tracked in git for reproducible installs.
+- `uv.lock` stays tracked in git for reproducible dev environments (`uv tool install` does not read it).
 
 ## Acceptance criteria
 
@@ -21,4 +21,10 @@ fails with `command not found` (made worse by the easy typo `kwand`).
   reinstall after pulling, and uninstall.
 - README Development section mentions `uv tool install --editable .`.
 - `.gitignore` does not ignore `uv.lock`.
-- After `uv tool install .`, `kwamd --help` (or `kwamd` with no args) runs from outside the repo.
+- After `uv tool install .`, `kwamd --help` exits 0 from outside the repo (in a new shell after
+  `uv tool update-shell` if needed).
+
+## Comments
+
+- 2026-11-24: Implemented in PR #4 (README Install section, editable-install tip, `.gitignore`
+  keeps `uv.lock` tracked). Verified `kwamd --help` from outside the repo.
