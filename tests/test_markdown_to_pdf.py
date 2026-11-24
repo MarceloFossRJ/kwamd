@@ -820,3 +820,61 @@ def test_missing_image_alt_text_is_shown_without_its_markup(workdir: Path) -> No
     text = pdf_text(workdir / "notes.pdf")
     assert "The sales chart" in text
     assert "**" not in text
+
+
+_GIF = (
+    b"GIF89a\x01\x00\x01\x00\x80\x00\x00\x00\x00\x00\xff\xff\xff"
+    b",\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02D\x01\x00;"
+)
+# A GIF87a with a graphic control extension, as macOS's sips writes: MuPDF
+# decodes it but logs "ignoring unsupported extension label f9".
+_GIF_WITH_EXTENSION = (
+    b"GIF87a\x01\x00\x01\x00\x80\x00\x00\x00\x00\x00\xff\xff\xff"
+    b"!\xf9\x04\x01\x00\x00\x00\x00"
+    b",\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02D\x01\x00;"
+)
+
+
+@pytest.mark.parametrize(
+    ("name", "content"),
+    [
+        ("photo.jpg", None),
+        ("icon.gif", _GIF),
+        ("sips.gif", _GIF_WITH_EXTENSION),
+    ],
+    ids=["jpeg", "gif", "gif-with-extension"],
+)
+def test_jpeg_and_gif_images_are_embedded(
+    workdir: Path, capsys: pytest.CaptureFixture[str], name: str, content: bytes | None
+) -> None:
+    image = workdir / name
+    if content is None:
+        pixmap = pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, 40, 20), False)
+        pixmap.clear_with(120)
+        content = pixmap.tobytes("jpg")
+    image.write_bytes(content)
+    source = workdir / "notes.md"
+    source.write_text(f"![Picture]({name})\n", encoding="utf-8")
+
+    assert main([str(source)]) == 0
+
+    assert _image_count(workdir / "notes.pdf") == 1
+    assert stderr_lines(capsys.readouterr().err, workdir.parent) == []
+
+
+def test_cut_off_jpeg_shows_alt_text_with_a_warning(
+    workdir: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    pixmap = pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, 2000, 50), False)
+    pixmap.clear_with(90)
+    content = pixmap.tobytes("jpg")
+    (workdir / "photo.jpg").write_bytes(content[: len(content) // 2])
+    source = workdir / "notes.md"
+    source.write_text("![Photo](photo.jpg)\n", encoding="utf-8")
+
+    assert main([str(source)]) == 0
+
+    assert stderr_lines(capsys.readouterr().err, workdir.parent) == [
+        "kwamd: warning: not a usable image, showing alt text instead: <tmp>/cwd/photo.jpg"
+    ]
+    assert _image_count(workdir / "notes.pdf") == 0

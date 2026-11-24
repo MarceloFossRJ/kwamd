@@ -57,7 +57,7 @@ plus tables and strikethrough; raw HTML is shown as text. The PDF's title is the
 `#` heading, or the file name without its extension. YAML front matter at the top of
 the file is left out.
 
-- **Images:** local images (PNG, JPEG, GIF and the other formats MuPDF reads, plus SVG)
+- **Images:** local images (PNG, JPEG, GIF and the other formats PyMuPDF reads, plus SVG)
   are embedded, with paths read against the Markdown file's folder. Remote images are
   never downloaded, and an image that can't be used shows its alt text instead. Remote
   images share one warning; each image that can't be used gets its own. The PDF is

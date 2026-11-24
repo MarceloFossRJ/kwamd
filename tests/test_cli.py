@@ -387,9 +387,13 @@ def test_help_describes_both_directions(workdir: Path, capsys: pytest.CaptureFix
     help_text = " ".join(capsys.readouterr().out.split())  # argparse wraps lines
     assert "usage: kwamd" in help_text
     assert "Convert a PDF to Markdown, or Markdown to a PDF." in help_text
-    # Each argument's help covers both directions: both default Targets are named.
-    assert "<source name>.md" in help_text
-    assert "<source name>.pdf" in help_text
+    # Each argument's help covers both directions.
+    arguments = help_text.split("positional arguments:", 1)[1].split("options:", 1)[0]
+    source_help, target_help = arguments.split(" target ", 1)
+    assert "PDF" in source_help
+    assert "Markdown" in source_help
+    assert "<source name>.md" in target_help
+    assert "<source name>.pdf" in target_help
 
 
 def test_version_prints_the_package_version(
