@@ -1,5 +1,6 @@
 """Shared fixtures: build Sources (and invalid ones) on the fly with PyMuPDF."""
 
+import unicodedata
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Protocol
@@ -108,3 +109,36 @@ def assert_failed_with_one_line(
     for fragment in fragments:
         assert fragment in line
     assert not list(workdir.glob(target_glob))
+
+
+# Reading a PDF Target back. Assert on its text through pdf_text: raw
+# get_text() returns ligatures such as "ﬁ" and Arabic presentation forms.
+
+
+def pdf_text(path: Path) -> str:
+    """The PDF's text, NFKC-normalised: ligatures such as "ﬁ" and Arabic
+    presentation forms come back as the plain characters that were written."""
+    with pymupdf.open(path) as doc:
+        return unicodedata.normalize("NFKC", "".join(str(page.get_text()) for page in doc))
+
+
+def link_pages(path: Path) -> dict[str, int]:
+    """Where each in-document link on the first page goes, keyed by its text."""
+    with pymupdf.open(path) as doc:
+        page = doc[0]
+        return {
+            str(page.get_textbox(link["from"])).strip(): link["page"]
+            for link in page.get_links()
+            if link["kind"] == pymupdf.LINK_GOTO
+        }
+
+
+def page_of(path: Path, text: str) -> int:
+    with pymupdf.open(path) as doc:
+        [number] = [int(page.number) for page in doc if text in str(page.get_text())]
+    return number
+
+
+def image_count(path: Path) -> int:
+    with pymupdf.open(path) as doc:
+        return sum(len(page.get_images()) for page in doc)
