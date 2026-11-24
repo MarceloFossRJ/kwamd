@@ -4,20 +4,13 @@ import unicodedata
 from pathlib import Path
 from typing import Any
 
+import markdown_it
 import pymupdf
 import pytest
 
 from kwamd import main
 
-from .conftest import MakeSource, stderr_lines
-
-
-@pytest.fixture
-def workdir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    cwd = tmp_path / "cwd"
-    cwd.mkdir()
-    monkeypatch.chdir(cwd)
-    return cwd
+from .conftest import MakeSource, assert_failed_with_one_line, stderr_lines
 
 
 def pdf_text(path: Path) -> str:
@@ -46,18 +39,6 @@ def test_markdown_source_becomes_pdf_target_in_current_folder(
     assert not (elsewhere / "notes.pdf").exists()
 
 
-def _assert_failed_with_one_line(
-    capsys: pytest.CaptureFixture[str], workdir: Path, *fragments: str
-) -> None:
-    captured = capsys.readouterr()
-    assert captured.out == ""
-    [line] = stderr_lines(captured.err, workdir.parent)
-    assert line.startswith("kwamd: error: ")
-    for fragment in fragments:
-        assert fragment in line
-    assert not list(workdir.glob("*.pdf"))
-
-
 def test_markdown_source_that_is_not_utf8_fails(
     workdir: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -67,7 +48,7 @@ def test_markdown_source_that_is_not_utf8_fails(
     exit_code = main([str(source)])
 
     assert exit_code == 1
-    _assert_failed_with_one_line(capsys, workdir, "not UTF-8 text", "notes.md")
+    assert_failed_with_one_line(capsys, workdir, "not UTF-8 text", "notes.md", target_glob="*.pdf")
 
 
 @pytest.mark.parametrize("content", ["", " \n\t\n"], ids=["empty", "whitespace"])
@@ -80,7 +61,7 @@ def test_empty_markdown_source_fails(
     exit_code = main([str(source)])
 
     assert exit_code == 1
-    _assert_failed_with_one_line(capsys, workdir, "Source is empty", "notes.md")
+    assert_failed_with_one_line(capsys, workdir, "Source is empty", "notes.md", target_glob="*.pdf")
 
 
 def test_byte_order_mark_is_accepted_and_not_rendered(workdir: Path) -> None:
@@ -159,7 +140,9 @@ def test_source_that_is_neither_pdf_nor_markdown_fails(
     exit_code = main([str(source)])
 
     assert exit_code == 1
-    _assert_failed_with_one_line(capsys, workdir, "neither a PDF nor Markdown", name)
+    assert_failed_with_one_line(
+        capsys, workdir, "neither a PDF nor Markdown", name, target_glob="*.pdf"
+    )
     assert sorted(p.name for p in workdir.iterdir()) == [name]
 
 
@@ -172,7 +155,7 @@ def test_source_kind_is_checked_before_target(
     exit_code = main([str(source), "missing/out.pdf"])
 
     assert exit_code == 1
-    _assert_failed_with_one_line(capsys, workdir, "neither a PDF nor Markdown")
+    assert_failed_with_one_line(capsys, workdir, "neither a PDF nor Markdown", target_glob="*.pdf")
 
 
 def test_target_is_checked_before_markdown_is_read(
@@ -184,7 +167,7 @@ def test_target_is_checked_before_markdown_is_read(
     exit_code = main([str(source), "missing/out.pdf"])
 
     assert exit_code == 1
-    _assert_failed_with_one_line(capsys, workdir, "folder does not exist")
+    assert_failed_with_one_line(capsys, workdir, "folder does not exist", target_glob="*.pdf")
 
 
 def test_table_renders_as_a_table(workdir: Path) -> None:
@@ -341,17 +324,67 @@ def test_pdf_has_the_fixed_look(workdir: Path) -> None:
     assert "Mono" in str(spans["code_here()"]["font"])
 
 
+@pytest.mark.parametrize(
+    "library", [(pymupdf, "Story"), (markdown_it.MarkdownIt, "parse")], ids=["layout", "parse"]
+)
 def test_rendering_failure_is_one_line_and_leaves_no_target(
-    workdir: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    workdir: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    library: tuple[object, str],
 ) -> None:
-    def broken_story(*_args: object, **_kwargs: object) -> None:
+    def broken(*_args: object, **_kwargs: object) -> None:
         raise RuntimeError("layout exploded\nwith a second line")
 
-    monkeypatch.setattr(pymupdf, "Story", broken_story)
+    monkeypatch.setattr(*library, broken)
     source = workdir / "notes.md"
     source.write_text("Hello\n", encoding="utf-8")
 
     exit_code = main([str(source)])
 
     assert exit_code == 1
-    _assert_failed_with_one_line(capsys, workdir, "Cannot render Source", "layout exploded")
+    assert_failed_with_one_line(
+        capsys, workdir, "Cannot render Source", "layout exploded", target_glob="*.pdf"
+    )
+
+
+def test_markdown_that_mentions_the_pdf_signature_is_still_markdown(workdir: Path) -> None:
+    source = workdir / "notes.md"
+    source.write_text("# File formats\n\nEvery PDF starts with `%PDF-1.7`.\n", encoding="utf-8")
+
+    exit_code = main([str(source)])
+
+    assert exit_code == 0
+    assert "Every PDF starts with" in pdf_text(workdir / "notes.pdf")
+
+
+def test_arabic_with_ligatures_is_drawn_in_an_arabic_font(workdir: Path) -> None:
+    source = workdir / "notes.md"
+    source.write_text("اللغة العربية\n", encoding="utf-8")
+
+    assert main([str(source)]) == 0
+
+    # Text extraction garbles the lam-alef ligature (U+FEFB becomes U+01C4
+    # under NFKC), so check that a font able to shape Arabic drew it.
+    with pymupdf.open(workdir / "notes.pdf") as doc:
+        fonts = [font[3] for font in doc[0].get_fonts()]
+    assert any("Arabic" in font for font in fonts), fonts
+
+
+def test_interrupted_markdown_conversion_leaves_no_target(
+    workdir: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def interrupted(*_args: object, **_kwargs: object) -> None:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(pymupdf, "Story", interrupted)
+    source = workdir / "notes.md"
+    source.write_text("Hello\n", encoding="utf-8")
+
+    exit_code = main([str(source)])
+
+    assert exit_code == 130
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert stderr_lines(captured.err, workdir.parent) == ["kwamd: interrupted"]
+    assert not list(workdir.glob("*.pdf"))

@@ -1,4 +1,4 @@
-"""Opening a Source, judged by content, never by extension."""
+"""Recognising and opening a Source: a PDF Source by content, a Markdown Source by extension."""
 
 from collections.abc import Iterable
 from pathlib import Path
@@ -36,20 +36,12 @@ class Source:
 
 
 def open_source(path: Path, passwords: Iterable[str]) -> Source:
-    """Open ``path`` as a Source, or raise ``KwamdError`` saying why it cannot be converted.
+    """Open the PDF Source at ``path``, or raise ``KwamdError`` saying why it cannot be converted.
 
+    ``path`` has already passed ``source_kind``, so it is a readable file.
     ``passwords`` is only consumed for a password-protected Source: each one is
     tried in turn until one opens it. It may be lazy (e.g. prompting a person).
     """
-    if path.is_dir():
-        raise KwamdError(f"Source is a folder, not a PDF: {path}")
-    if not path.exists():
-        raise KwamdError(f"Source does not exist: {path}")
-    try:
-        path.open("rb").close()
-    except OSError as error:
-        raise KwamdError(f"Cannot read Source {path}: {error.strerror}") from None
-
     # MuPDF otherwise prints its own diagnostics to stderr for unreadable files.
     pymupdf.TOOLS.mupdf_display_errors(False)
     try:
@@ -71,6 +63,9 @@ def open_source(path: Path, passwords: Iterable[str]) -> Source:
 
 type SourceKind = Literal["pdf", "markdown"]
 
+TARGET_SUFFIX: dict[SourceKind, str] = {"pdf": ".md", "markdown": ".pdf"}
+"""The default Target's extension for each kind of Source."""
+
 MARKDOWN_SUFFIXES = (".md", ".markdown")
 PDF_SIGNATURE = b"%PDF-"
 SIGNATURE_WINDOW = 1024
@@ -91,9 +86,12 @@ def source_kind(path: Path) -> SourceKind:
             head = file.read(SIGNATURE_WINDOW)
     except OSError as error:
         raise KwamdError(f"Cannot read Source {path}: {error.strerror}") from None
-    if PDF_SIGNATURE in head:
+    is_markdown_name = path.suffix.lower() in MARKDOWN_SUFFIXES
+    # Markdown can mention "%PDF-" in its text, so a Markdown-named file only
+    # counts as a PDF when the signature is its very first bytes (ADR 0001).
+    if head.startswith(PDF_SIGNATURE) or (not is_markdown_name and PDF_SIGNATURE in head):
         return "pdf"
-    if path.suffix.lower() in MARKDOWN_SUFFIXES:
+    if is_markdown_name:
         return "markdown"
     raise KwamdError(f"Source is neither a PDF nor Markdown: {path}")
 

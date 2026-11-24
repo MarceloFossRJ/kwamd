@@ -26,7 +26,7 @@ Every Target rule, the stream contract and the exit codes from v1 carry over unc
 6. As a user, I want a clear error when the Source is neither a PDF nor Markdown (e.g. `notes.txt`, a renamed `.docx`), so that I am not handed a strange PDF.
 7. As a user, I want a clear error when a Markdown Source is not valid UTF-8, or is empty or only whitespace, so that I am not given a blank or garbled PDF. A leading byte-order mark is fine.
 8. As a user, I want headings, bold, italics, strikethrough, inline code, lists, block quotes, horizontal rules, code blocks and tables rendered, so that the PDF reflects the document's structure.
-9. As a user, I want links to be clickable, both web links and links to headings in the same document.
+9. As a user, I want links to be clickable, both web links and links to headings in the same document. A link to a heading that doesn't exist shows as plain text.
 10. As a user, I want raw HTML in the Markdown to appear as literal text, so that it can never quietly break the layout.
 11. As a user, I want local images (relative paths read against the Markdown file's folder) embedded in the PDF.
 12. As a user, I want a remote image (`http://` or `https://`) shown as its alt text with one warning, so that kwamd never makes a network call.
@@ -41,13 +41,13 @@ Every Target rule, the stream contract and the exit codes from v1 carry over unc
 
 ## Implementation Decisions
 
-- **Source kind** (ADR 0001). Read the first bytes: a PDF signature means a PDF Source. Otherwise a `.md`/`.markdown` suffix (case-insensitive) means a Markdown Source. Otherwise: `Source is neither a PDF nor Markdown: <path>`, exit 1. Missing, folder and unreadable Sources keep their v1 messages, checked before the kind. Detecting the kind never prompts.
+- **Source kind** (ADR 0001). Read the first kilobyte: a PDF signature means a PDF Source. For a file with a Markdown extension the signature must be its very first bytes, because Markdown text can mention `%PDF-`. Otherwise a `.md`/`.markdown` suffix (case-insensitive) means a Markdown Source. Otherwise: `Source is neither a PDF nor Markdown: <path>`, exit 1. Missing, folder and unreadable Sources keep their v1 messages, checked before the kind. Detecting the kind never prompts.
 - **Order of checks.** 1) Source kind, 2) resolve and check the Target (default extension from the kind), 3) open the Source (unlock a PDF, possibly prompting; or read and decode Markdown), 4) convert and write. Every v1 guarantee about checking before asking still holds.
 - **Rendering** (ADR 0002). markdown-it-py (CommonMark preset, plus the `table` and `strikethrough` rules, `html` disabled) produces HTML. PyMuPDF `Story` lays it out with `write_with_links`, so links stay clickable. No other runtime dependency.
 - **Fixed look.**
   - Page and type: A4 with 2 cm margins; body text in MuPDF's default serif (Charis SIL) at 11 pt; headings bold, sized down from H1 to H6.
   - Code and blocks: code in Nimbus Mono on a light grey background; tables with thin borders; quotes with a grey left bar.
-  - Colour: black on white throughout.
+  - Colour: black on white, except links, which stay MuPDF's underlined blue so they read as clickable.
   - Fonts: MuPDF's built-in fallback fonts cover non-Latin scripts and emoji, so none are bundled.
   - Flags: no styling or page-size flags.
 - **Images.**
@@ -55,6 +55,7 @@ Every Target rule, the stream contract and the exit codes from v1 carry over unc
   - Remote images are replaced by their alt text, with one warning per run: `kwamd: warning: remote images are not downloaded; showing alt text instead: <n> image(s)`.
   - Missing or unreadable local images are replaced by alt text, with one warning each naming the path.
   - Warnings never change the exit code.
+- **Links to a missing heading** (`[x](#nowhere)`) render as plain text, silently. Story cannot lay out a link to an id that doesn't exist.
 - **Page numbers.** A centred number at the bottom margin of every page, drawn after layout.
 - **Metadata.** PDF title is the text of the first `#` heading, else the Source's stem. No author.
 - **Front matter.** If the first line is exactly `---`, everything up to and including the next line that is exactly `---` is dropped before rendering. Without a closing `---`, nothing is dropped.

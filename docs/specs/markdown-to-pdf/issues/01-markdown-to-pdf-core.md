@@ -15,8 +15,9 @@ kwamd only converts a PDF Source to Markdown. A Markdown Source should convert t
 - The Source kind is checked before the Target is resolved, and the Target is resolved before a Source is opened.
 - The PDF is A4 with 2 cm margins, in the fixed look from the spec.
 - Headings, bold, italics, strikethrough, inline code, lists, quotes, rules, code blocks and tables render: their text can be extracted from the PDF.
-- Web links and links to headings in the same document are clickable.
+- Web links and links to headings in the same document are clickable, and shown in underlined blue. A link to a missing heading renders as plain text, with no warning.
+- A Markdown file whose text mentions `%PDF-` is still a Markdown Source; only a signature at its very start makes it a PDF.
 - Raw HTML shows as literal text.
-- Greek, Cyrillic, CJK and Arabic text can be extracted from the PDF.
+- Greek, Cyrillic, CJK and Arabic text can be extracted from the PDF. Arabic ligatures such as lam-alef don't survive extraction, so for those the check is that an Arabic font drew them.
 - A rendering failure gives one `kwamd: error:` line, exit 1, and no partial Target.
 - The runtime dependencies are `pymupdf4llm` and `markdown-it-py` only. All v1 tests still pass.

@@ -9,4 +9,6 @@ kwamd converts in whichever direction the Source implies. A PDF has a signature,
 
 ## Consequences
 
+A file with a Markdown extension counts as a PDF only when the PDF signature is its very first bytes, since Markdown text can mention `%PDF-`. Other files keep the PDF rule of a signature anywhere in the first kilobyte.
+
 Content wins for PDFs: a real PDF named `report.md` converts to Markdown. Its default Target collides with the Source itself, so it is written as `report (1).md`.

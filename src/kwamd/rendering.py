@@ -13,7 +13,7 @@ import pymupdf
 from markdown_it import MarkdownIt
 from markdown_it.token import Token
 
-from kwamd.errors import KwamdError
+from kwamd.errors import KwamdError, one_line
 
 PAGE = pymupdf.paper_rect("a4")
 MARGIN = 72 * 2 / 2.54  # 2 cm in points
@@ -43,15 +43,21 @@ def render_pdf(markdown: str, source_path: Path) -> bytes:
 
     Relative resources, such as images, are read from the Source's folder.
     """
+    # MuPDF otherwise prints its own diagnostics to stderr.
+    pymupdf.TOOLS.mupdf_display_errors(False)
+    try:
+        return _layout(_html(markdown), source_path.parent)
+    except Exception as error:
+        # Neither markdown-it-py nor Story documents its exception types, so
+        # any failure is reported as the Source's.
+        raise KwamdError(f"Cannot render Source {source_path}: {one_line(error)}") from None
+
+
+def _html(markdown: str) -> str:
     tokens = MARKDOWN.parse(markdown)
     _unlink_missing_anchors(tokens, _add_heading_ids(tokens))
-    html = MARKDOWN.renderer.render(tokens, MARKDOWN.options, {})
-    try:
-        return _layout(html, source_path.parent)
-    except Exception as error:
-        # PyMuPDF documents no exception types for Story; any failure is the Source's.
-        reason = " ".join(str(error).split())  # keep the report to one line
-        raise KwamdError(f"Cannot render Source {source_path}: {reason}") from None
+    html: str = MARKDOWN.renderer.render(tokens, MARKDOWN.options, {})
+    return html
 
 
 def _layout(html: str, folder: Path) -> bytes:
@@ -90,8 +96,12 @@ def _unlink_missing_anchors(tokens: list[Token], ids: set[str]) -> None:
     for token in tokens:
         for child in token.children or []:
             href = child.attrGet("href")
-            is_anchor = child.type == "link_open" and isinstance(href, str) and href[:1] == "#"
-            if is_anchor and str(href)[1:] not in ids:
+            if (
+                child.type == "link_open"
+                and isinstance(href, str)
+                and href.startswith("#")
+                and href[1:] not in ids
+            ):
                 del child.attrs["href"]
 
 

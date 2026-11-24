@@ -6,7 +6,7 @@ swapped or augmented (e.g. with OCR) without touching the CLI.
 
 import pymupdf4llm
 
-from kwamd.errors import KwamdError
+from kwamd.errors import KwamdError, one_line
 from kwamd.source import Source
 
 
@@ -23,6 +23,5 @@ def convert(source: Source) -> str:
         )
     except Exception as error:
         # PyMuPDF4LLM documents no exception types; any failure is the Source's.
-        reason = " ".join(str(error).split())  # keep the report to one line
-        raise KwamdError(f"Cannot convert Source {source.path}: {reason}") from None
+        raise KwamdError(f"Cannot convert Source {source.path}: {one_line(error)}") from None
     return markdown
