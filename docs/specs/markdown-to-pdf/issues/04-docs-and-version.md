@@ -1,6 +1,6 @@
 # 04: README, description and version 0.2.0
 
-Status: ready-for-agent
+Status: resolved
 Blocked by: 01
 
 ## Problem
