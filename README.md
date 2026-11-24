@@ -65,6 +65,20 @@ the file is left out.
 - **Links:** web (`http`, `https`), `mailto:` and `#heading` links are clickable. Any
   other link, such as a relative path or `file:`, appears as plain text.
 
+## Use from Claude Code
+
+A Claude Code plugin teaches agents to use kwamd: to read or summarise a PDF, or to make a
+PDF from Markdown. It also tells them to report warnings such as a Scanned Source, and to
+hand a password-protected PDF back to you. Install kwamd first (above), then in Claude Code:
+
+```
+/plugin marketplace add MarceloFossRJ/kwamd
+/plugin install kwamd@kwamd
+```
+
+The plugin works in every project. The agent never installs kwamd or asks for a PDF
+password: for a protected PDF it asks you to run `! kwamd <file>` yourself.
+
 ## Development
 
 Every clone needs the git hooks installed once:
@@ -82,6 +96,10 @@ uv run ruff format --check
 uv run mypy
 uv run pytest
 ```
+
+The plugin lives in `plugins/kwamd/`, listed by `.claude-plugin/marketplace.json`. Its version
+must equal the one in `pyproject.toml` (`scripts/check_plugin.py` checks this), so bump both
+together. CI also runs `claude plugin validate` on both manifests.
 
 To have `kwamd` on your PATH always run your working tree, install it in editable mode:
 

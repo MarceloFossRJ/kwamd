@@ -400,7 +400,7 @@ def test_version_prints_the_package_version(
     workdir: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     assert main(["--version"]) == 0
-    assert capsys.readouterr().out == "kwamd 0.2.0\n"
+    assert capsys.readouterr().out == "kwamd 0.3.0\n"
 
 
 def test_unwritable_target_folder_fails(

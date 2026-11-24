@@ -1,6 +1,6 @@
 [project]
 name = "kwamd"
-version = "0.2.0"
+version = "0.3.0"
 description = "A command-line tool that converts a PDF document into a Markdown file, or a Markdown file into a PDF document."
 readme = "README.md"
 license = "AGPL-3.0-or-later"
@@ -31,6 +31,8 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Lets tests import the repo scripts (scripts/check_plugin.py) as modules.
+pythonpath = ["scripts"]
 filterwarnings = [
     "ignore:builtin type .* has no __module__ attribute:DeprecationWarning",
 ]

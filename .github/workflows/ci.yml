@@ -18,3 +18,10 @@ jobs:
       - run: uv run pytest
       - run: uv run python scripts/check_specs.py
       - run: scripts/check_gitignore.sh
+      - run: uv run python scripts/check_plugin.py
+      # Claude Code's own validator for the marketplace, plugin and skill (no login needed).
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npx -y @anthropic-ai/claude-code@2.1.323 plugin validate .
+      - run: npx -y @anthropic-ai/claude-code@2.1.323 plugin validate plugins/kwamd
