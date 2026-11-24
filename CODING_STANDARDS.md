@@ -7,7 +7,7 @@ Judgement-call rules for review. Mechanical rules live in tooling instead (ruff,
 kwamd talks to scripts as well as people, so every way a run can end is part of its interface (see the spec's stream contract).
 
 - **One line per failure.** Every failure path ends in exactly one `kwamd: error: …` line on stderr and a defined exit code (1 Source/Target, 2 usage, 130 interrupted). A Python traceback reaching the user is a defect. Text from a library error is flattened to one line before it is shown.
-- **Library calls behind the boundary.** Every call into PyMuPDF or PyMuPDF4LLM sits in the module that owns it (`source.py`, `conversion.py`). That module translates the library's failures into `KwamdError`, because the libraries document no stable exception types.
+- **Library calls behind the boundary.** Every call into PyMuPDF, PyMuPDF4LLM or markdown-it-py sits in the module that owns it (`source.py`, `conversion.py`, `rendering.py`). That module translates the library's failures into `KwamdError`, because the libraries document no stable exception types.
 - **Created files are cleaned up on any exception.** When kwamd creates a file and a later step fails, including `KeyboardInterrupt`, the file is removed: clean up on `BaseException`, not just `OSError`. The rule a Target must keep: nothing partial is left behind.
 - **Existence checks count every directory entry.** Checks that decide whether a path is free use `os.path.lexists`, so a dangling symlink counts as taken. `Path.exists()` follows links and reports a dangling one as free.
 - **Check before asking.** Validate everything that can be checked without the person (the Target path, the arguments) before prompting them, for example for a password.

@@ -131,7 +131,7 @@ def test_pdf_named_like_markdown_converts_to_markdown(
 
 
 @pytest.mark.parametrize("name", ["notes.txt", "notes.docx", "README"])
-def test_source_that_is_neither_pdf_nor_markdown_fails(
+def test_text_source_without_markdown_extension_fails(
     workdir: Path, capsys: pytest.CaptureFixture[str], name: str
 ) -> None:
     source = workdir / name
@@ -388,3 +388,60 @@ def test_interrupted_markdown_conversion_leaves_no_target(
     assert captured.out == ""
     assert stderr_lines(captured.err, workdir.parent) == ["kwamd: interrupted"]
     assert not list(workdir.glob("*.pdf"))
+
+
+def _link_pages(path: Path) -> dict[str, int]:
+    """Where each in-document link on the first page goes, keyed by its text."""
+    with pymupdf.open(path) as doc:
+        page = doc[0]
+        return {
+            str(page.get_textbox(link["from"])).strip(): link["page"]
+            for link in page.get_links()
+            if link["kind"] == pymupdf.LINK_GOTO
+        }
+
+
+def _page_of(path: Path, text: str) -> int:
+    with pymupdf.open(path) as doc:
+        [number] = [int(page.number) for page in doc if text in str(page.get_text())]
+    return number
+
+
+@pytest.mark.parametrize(
+    ("link", "heading"),
+    [("#café-menu", "Café menu"), ("#Next-Steps", "Next steps")],
+    ids=["accented", "capitalised"],
+)
+def test_heading_links_match_like_github(workdir: Path, link: str, heading: str) -> None:
+    source = workdir / "notes.md"
+    source.write_text(
+        f"Go [there]({link}).\n\n" + "Filler.\n\n" * 80 + f"## {heading}\n\nDone.\n",
+        encoding="utf-8",
+    )
+
+    assert main([str(source)]) == 0
+
+    target = workdir / "notes.pdf"
+    assert _link_pages(target) == {"there": _page_of(target, heading)}
+
+
+def test_repeated_headings_get_distinct_ids_like_github(workdir: Path) -> None:
+    source = workdir / "notes.md"
+    source.write_text(
+        "[a](#plan) [b](#plan-1) [c](#plan-2)\n\n"
+        "## Plan\n\nFirst.\n\n"
+        + "Filler.\n\n" * 60
+        + "## Plan-1\n\nSecond.\n\n"
+        + "Filler.\n\n" * 60
+        + "## Plan\n\nThird.\n",
+        encoding="utf-8",
+    )
+
+    assert main([str(source)]) == 0
+
+    target = workdir / "notes.pdf"
+    assert _link_pages(target) == {
+        "a": _page_of(target, "First."),
+        "b": _page_of(target, "Second."),
+        "c": _page_of(target, "Third."),
+    }

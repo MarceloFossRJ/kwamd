@@ -55,7 +55,7 @@ Every Target rule, the stream contract and the exit codes from v1 carry over unc
   - Remote images are replaced by their alt text, with one warning per run: `kwamd: warning: remote images are not downloaded; showing alt text instead: <n> image(s)`.
   - Missing or unreadable local images are replaced by alt text, with one warning each naming the path.
   - Warnings never change the exit code.
-- **Links to a missing heading** (`[x](#nowhere)`) render as plain text, silently. Story cannot lay out a link to an id that doesn't exist.
+- **Heading links.** Headings get GitHub's ids: a repeated slug takes the lowest free `-<n>`, skipping ids an earlier heading already took. A `#…` link matches after undoing percent-encoding and ignoring case, as GitHub does. A link to a missing heading (`[x](#nowhere)`) renders as plain text, silently, because Story cannot lay out a link to an id that doesn't exist.
 - **Page numbers.** A centred number at the bottom margin of every page, drawn after layout.
 - **Metadata.** PDF title is the text of the first `#` heading, else the Source's stem. No author.
 - **Front matter.** If the first line is exactly `---`, everything up to and including the next line that is exactly `---` is dropped before rendering. Without a closing `---`, nothing is dropped.
@@ -72,6 +72,7 @@ Every Target rule, the stream contract and the exit codes from v1 carry over unc
 - The same one seam as v1: tests call `main(argv)` and assert on the exit code, stdout, stderr and the files on disk.
 - Markdown fixtures are written in each test. The resulting PDF is read back with PyMuPDF to check extracted text, page count, links, embedded images, the title metadata and page-number text. Content assertions are tolerant: no byte-exact PDF comparisons.
 - Remote images need no fake, because they are never fetched.
+- The library-failure paths that may be faked: `pymupdf.Story` or `MarkdownIt.parse` raising (one error line, no Target), and `Story` raising `KeyboardInterrupt` (exit 130, no Target).
 
 ## Out of Scope
 

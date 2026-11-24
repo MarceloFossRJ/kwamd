@@ -5,15 +5,16 @@ This is the only module that knows about markdown-it-py and PyMuPDF's Story
 """
 
 import re
-from collections import Counter
 from itertools import pairwise
 from pathlib import Path
+from urllib.parse import unquote
 
 import pymupdf
 from markdown_it import MarkdownIt
 from markdown_it.token import Token
 
 from kwamd.errors import KwamdError, one_line
+from kwamd.mupdf import quiet_mupdf
 
 PAGE = pymupdf.paper_rect("a4")
 MARGIN = 72 * 2 / 2.54  # 2 cm in points
@@ -43,8 +44,7 @@ def render_pdf(markdown: str, source_path: Path) -> bytes:
 
     Relative resources, such as images, are read from the Source's folder.
     """
-    # MuPDF otherwise prints its own diagnostics to stderr.
-    pymupdf.TOOLS.mupdf_display_errors(False)
+    quiet_mupdf()
     try:
         return _layout(_html(markdown), source_path.parent)
     except Exception as error:
@@ -55,7 +55,7 @@ def render_pdf(markdown: str, source_path: Path) -> bytes:
 
 def _html(markdown: str) -> str:
     tokens = MARKDOWN.parse(markdown)
-    _unlink_missing_anchors(tokens, _add_heading_ids(tokens))
+    _resolve_anchor_links(tokens, _add_heading_ids(tokens))
     html: str = MARKDOWN.renderer.render(tokens, MARKDOWN.options, {})
     return html
 
@@ -73,35 +73,41 @@ def _layout(html: str, folder: Path) -> bytes:
 def _add_heading_ids(tokens: list[Token]) -> set[str]:
     """Give each heading the id GitHub would, so ``[x](#some-heading)`` links work.
 
+    A repeated slug gets the lowest free ``-<n>``, skipping ids an earlier
+    heading already took (a heading named "Plan-1" takes ``plan-1``).
     Returns the ids given.
     """
-    seen: Counter[str] = Counter()
-    ids = set()
+    ids: set[str] = set()
     for opening, inline in pairwise(tokens):
         if opening.type != "heading_open":
             continue
-        slug = _slug(inline.content)
-        heading_id = f"{slug}-{seen[slug]}" if seen[slug] else slug
+        slug = heading_id = _slug(inline.content)
+        n = 0
+        while heading_id in ids:
+            n += 1
+            heading_id = f"{slug}-{n}"
         opening.attrSet("id", heading_id)
         ids.add(heading_id)
-        seen[slug] += 1
     return ids
 
 
-def _unlink_missing_anchors(tokens: list[Token], ids: set[str]) -> None:
-    """Turn a link to a heading that doesn't exist into plain text.
+def _resolve_anchor_links(tokens: list[Token], ids: set[str]) -> None:
+    """Point each ``#…`` link at its heading id, matched the way GitHub does.
 
-    Story raises on a link whose target id is missing.
+    markdown-it percent-encodes link targets (``#café`` arrives as
+    ``#caf%C3%A9``) and GitHub ignores case, so both are undone before
+    matching. A link to a heading that doesn't exist becomes plain text,
+    because Story raises on a link whose target id is missing.
     """
     for token in tokens:
         for child in token.children or []:
             href = child.attrGet("href")
-            if (
-                child.type == "link_open"
-                and isinstance(href, str)
-                and href.startswith("#")
-                and href[1:] not in ids
-            ):
+            if child.type != "link_open" or not isinstance(href, str) or not href.startswith("#"):
+                continue
+            wanted = unquote(href[1:]).lower()
+            if wanted in ids:
+                child.attrSet("href", f"#{wanted}")
+            else:
                 del child.attrs["href"]
 
 

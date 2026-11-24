@@ -20,4 +20,4 @@ kwamd only converts a PDF Source to Markdown. A Markdown Source should convert t
 - Raw HTML shows as literal text.
 - Greek, Cyrillic, CJK and Arabic text can be extracted from the PDF. Arabic ligatures such as lam-alef don't survive extraction, so for those the check is that an Arabic font drew them.
 - A rendering failure gives one `kwamd: error:` line, exit 1, and no partial Target.
-- The runtime dependencies are `pymupdf4llm` and `markdown-it-py` only. All v1 tests still pass.
+- The runtime dependencies are `pymupdf4llm` and `markdown-it-py` only. All v1 tests still pass, except the not-a-PDF test, which now expects "neither a PDF nor Markdown" by design (ADR 0001).

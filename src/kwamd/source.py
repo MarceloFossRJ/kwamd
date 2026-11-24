@@ -8,6 +8,7 @@ from typing import Literal, Self
 import pymupdf
 
 from kwamd.errors import KwamdError
+from kwamd.mupdf import quiet_mupdf
 
 
 class Source:
@@ -42,8 +43,7 @@ def open_source(path: Path, passwords: Iterable[str]) -> Source:
     ``passwords`` is only consumed for a password-protected Source: each one is
     tried in turn until one opens it. It may be lazy (e.g. prompting a person).
     """
-    # MuPDF otherwise prints its own diagnostics to stderr for unreadable files.
-    pymupdf.TOOLS.mupdf_display_errors(False)
+    quiet_mupdf()
     try:
         document = pymupdf.open(path)
     except pymupdf.FileDataError:
@@ -85,7 +85,7 @@ def source_kind(path: Path) -> SourceKind:
         with path.open("rb") as file:
             head = file.read(SIGNATURE_WINDOW)
     except OSError as error:
-        raise KwamdError(f"Cannot read Source {path}: {error.strerror}") from None
+        raise _read_failure(path, error) from None
     is_markdown_name = path.suffix.lower() in MARKDOWN_SUFFIXES
     # Markdown can mention "%PDF-" in its text, so a Markdown-named file only
     # counts as a PDF when the signature is its very first bytes (ADR 0001).
@@ -101,7 +101,7 @@ def read_markdown_source(path: Path) -> str:
     try:
         content = path.read_bytes()
     except OSError as error:
-        raise KwamdError(f"Cannot read Source {path}: {error.strerror}") from None
+        raise _read_failure(path, error) from None
     try:
         text = content.decode("utf-8-sig")  # a leading byte-order mark is fine
     except UnicodeDecodeError:
@@ -109,3 +109,7 @@ def read_markdown_source(path: Path) -> str:
     if not text.strip():
         raise KwamdError(f"Source is empty: {path}")
     return text
+
+
+def _read_failure(path: Path, error: OSError) -> KwamdError:
+    return KwamdError(f"Cannot read Source {path}: {error.strerror}")
