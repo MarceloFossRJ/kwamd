@@ -1,6 +1,6 @@
 # 01: Document how to install kwamd on the PATH
 
-Status: ready-for-agent
+Status: resolved
 
 ## Problem
 

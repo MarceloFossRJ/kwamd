@@ -34,3 +34,16 @@ repos:
         language: system
         types: [python]
         pass_filenames: false
+      - id: check-specs
+        name: docs/specs conventions
+        entry: uv run python scripts/check_specs.py
+        language: system
+        files: ^(docs/specs/|docs/agents/triage-labels\.md$|scripts/check_specs\.py$)
+        pass_filenames: false
+      # Secret and log files must stay ignored.
+      - id: gitignore-guards
+        name: .gitignore keeps secrets ignored
+        entry: scripts/check_gitignore.sh
+        language: system
+        files: ^(\.gitignore|scripts/check_gitignore\.sh)$
+        pass_filenames: false
