@@ -68,8 +68,10 @@ def _run(source_path: Path, requested_target: str | None) -> Path:
     # only to hit a bad path.
     target = resolve_target(source_path, requested_target, Path.cwd(), TARGET_SUFFIX[kind])
     if kind == "markdown":
-        markdown = read_markdown_source(source_path)
-        write_target(target, render_pdf(markdown, source_path))
+        rendering = render_pdf(read_markdown_source(source_path), source_path)
+        write_target(target, rendering.pdf)
+        for warning in rendering.warnings:
+            print(f"kwamd: warning: {warning}", file=sys.stderr)
         return target
     with open_source(source_path, _passwords_from_prompt(source_path)) as source:
         write_target(target, convert(source))

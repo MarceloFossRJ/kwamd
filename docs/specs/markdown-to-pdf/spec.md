@@ -51,9 +51,9 @@ Every Target rule, the stream contract and the exit codes from v1 carry over unc
   - Fonts: MuPDF's built-in fallback fonts cover non-Latin scripts and emoji, so none are bundled.
   - Flags: no styling or page-size flags.
 - **Images.**
-  - Local image paths are resolved against the Source's folder and served to `Story` through a `pymupdf.Archive` of that folder.
+  - Local image paths are resolved against the Source's folder, including `../` paths outside it. kwamd reads each image itself and serves it to `Story` from an in-memory `pymupdf.Archive`. Raster formats and SVG are embedded; wide images are scaled to the text width.
   - Remote images are replaced by their alt text, with one warning per run: `kwamd: warning: remote images are not downloaded; showing alt text instead: <n> image(s)`.
-  - Missing or unreadable local images are replaced by alt text, with one warning each naming the path.
+  - A local image that is missing, unreadable or not an image is replaced by its alt text, with one warning each naming the path (`image not found`, `cannot read image (<reason>)` or `not an image`, then `, showing alt text instead: <path>`).
   - Warnings never change the exit code.
 - **Heading links.** Headings get GitHub's ids: a repeated slug takes the lowest free `-<n>`, skipping ids an earlier heading already took. A `#…` link matches after undoing percent-encoding and ignoring case, as GitHub does. A link to a missing heading (`[x](#nowhere)`) renders as plain text, silently, because Story cannot lay out a link to an id that doesn't exist.
 - **Page numbers.** A centred number at the bottom margin of every page, drawn after layout.
