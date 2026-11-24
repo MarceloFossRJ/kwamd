@@ -1,6 +1,6 @@
 # 02: Images in a Markdown Source
 
-Status: ready-for-agent
+Status: resolved
 Blocked by: 01
 
 ## Problem

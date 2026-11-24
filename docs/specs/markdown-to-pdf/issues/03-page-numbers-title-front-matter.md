@@ -1,6 +1,6 @@
 # 03: Page numbers, title and front matter
 
-Status: ready-for-agent
+Status: resolved
 Blocked by: 01
 
 ## Problem
