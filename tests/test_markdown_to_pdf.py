@@ -1,6 +1,7 @@
 """Behaviour of ``kwamd`` for a Markdown Source, tested through ``main(argv)``."""
 
 import os
+import unicodedata
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -16,6 +17,7 @@ from .conftest import (
     assert_failed_with_one_line,
     image_count,
     link_pages,
+    link_targets,
     page_of,
     pdf_text,
     stderr_lines,
@@ -267,15 +269,9 @@ def test_web_links_and_heading_links_are_clickable(workdir: Path) -> None:
 
     assert main([str(source)]) == 0
 
-    with pymupdf.open(workdir / "notes.pdf") as doc:
-        links = doc[0].get_links()
     heading_page = page_of(workdir / "notes.pdf", "Next steps")
     assert heading_page > 0
-    # Story adds one link area per word, so compare where the links go, not how many.
-    assert {link["uri"] for link in links if link["kind"] == pymupdf.LINK_URI} == {
-        "https://example.org/docs"
-    }
-    assert {link["page"] for link in links if link["kind"] == pymupdf.LINK_GOTO} == {heading_page}
+    assert link_targets(workdir / "notes.pdf") == {"https://example.org/docs", heading_page}
 
 
 def test_link_to_a_missing_heading_renders_as_plain_text(
@@ -289,8 +285,7 @@ def test_link_to_a_missing_heading_renders_as_plain_text(
     assert exit_code == 0
     assert capsys.readouterr().err == ""
     assert "the plan" in pdf_text(workdir / "notes.pdf")
-    with pymupdf.open(workdir / "notes.pdf") as doc:
-        assert doc[0].get_links() == []
+    assert link_targets(workdir / "notes.pdf") == set()
 
 
 def _spans(path: Path) -> dict[str, dict[str, Any]]:
@@ -298,7 +293,7 @@ def _spans(path: Path) -> dict[str, dict[str, Any]]:
     with pymupdf.open(path) as doc:
         blocks = doc[0].get_text("dict")["blocks"]
     return {
-        span["text"].strip(): span
+        unicodedata.normalize("NFKC", span["text"]).strip(): span
         for block in blocks
         for line in block.get("lines", [])
         for span in line["spans"]
@@ -623,8 +618,7 @@ def test_link_to_a_local_or_script_address_renders_as_plain_text(
     text = pdf_text(workdir / "notes.pdf")
     assert "the file" in text
     assert "](" not in text
-    with pymupdf.open(workdir / "notes.pdf") as doc:
-        assert {link.get("uri") for link in doc[0].get_links()} == {"https://example.org"}
+    assert link_targets(workdir / "notes.pdf") == {"https://example.org"}
 
 
 def test_image_path_with_a_line_break_gives_a_one_line_warning(

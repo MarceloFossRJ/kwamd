@@ -1,4 +1,5 @@
-"""Shared fixtures: build Sources (and invalid ones) on the fly with PyMuPDF."""
+"""Shared test helpers: build Sources (and invalid ones) on the fly with PyMuPDF, check
+failures, and read a PDF Target back."""
 
 import unicodedata
 from collections.abc import Sequence
@@ -111,34 +112,50 @@ def assert_failed_with_one_line(
     assert not list(workdir.glob(target_glob))
 
 
-# Reading a PDF Target back. Assert on its text through pdf_text: raw
-# get_text() returns ligatures such as "ﬁ" and Arabic presentation forms.
+def _plain(text: str) -> str:
+    """Text extracted from a PDF, NFKC-normalised: ligatures such as "ﬁ" and Arabic
+    presentation forms come back as the plain characters that were written."""
+    return unicodedata.normalize("NFKC", text)
 
 
 def pdf_text(path: Path) -> str:
-    """The PDF's text, NFKC-normalised: ligatures such as "ﬁ" and Arabic
-    presentation forms come back as the plain characters that were written."""
+    """The whole PDF's text, normalised (see ``_plain``)."""
     with pymupdf.open(path) as doc:
-        return unicodedata.normalize("NFKC", "".join(str(page.get_text()) for page in doc))
+        return _plain("".join(str(page.get_text()) for page in doc))
+
+
+def page_of(path: Path, text: str) -> int:
+    """The number (from 0) of the one page whose normalised text contains ``text``."""
+    with pymupdf.open(path) as doc:
+        [number] = [int(page.number) for page in doc if text in _plain(str(page.get_text()))]
+    return number
+
+
+def link_targets(path: Path) -> set[str | int]:
+    """Where the links on the first page go: a web address, or a page number (from 0).
+
+    Story adds one link area per word of a link's text, so this is a set: it
+    says where links go, not how many areas there are.
+    """
+    with pymupdf.open(path) as doc:
+        return {
+            link["uri"] if link["kind"] == pymupdf.LINK_URI else link["page"]
+            for link in doc[0].get_links()
+        }
 
 
 def link_pages(path: Path) -> dict[str, int]:
-    """Where each in-document link on the first page goes, keyed by its text."""
+    """Where each in-document link on the first page goes, keyed by its normalised text."""
     with pymupdf.open(path) as doc:
         page = doc[0]
         return {
-            str(page.get_textbox(link["from"])).strip(): link["page"]
+            _plain(str(page.get_textbox(link["from"]))).strip(): link["page"]
             for link in page.get_links()
             if link["kind"] == pymupdf.LINK_GOTO
         }
 
 
-def page_of(path: Path, text: str) -> int:
-    with pymupdf.open(path) as doc:
-        [number] = [int(page.number) for page in doc if text in str(page.get_text())]
-    return number
-
-
 def image_count(path: Path) -> int:
+    """How many images the whole PDF embeds."""
     with pymupdf.open(path) as doc:
         return sum(len(page.get_images()) for page in doc)

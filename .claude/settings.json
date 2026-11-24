@@ -3,6 +3,10 @@
     "allow": [
       "Bash(git branch -d feat/*)",
       "Bash(git branch -d docs/*)"
+    ],
+    "deny": [
+      "Bash(git branch -d * -f*)",
+      "Bash(git branch -d * --force*)"
     ]
   }
 }

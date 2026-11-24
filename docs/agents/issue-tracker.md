@@ -7,7 +7,7 @@ Issues and specs for this repo live as markdown files in `docs/specs/`.
 - One feature per directory: `docs/specs/<feature-slug>/`
 - The spec is `docs/specs/<feature-slug>/spec.md`
 - Implementation issues are one file per ticket at `docs/specs/<feature-slug>/issues/<NN>-<slug>.md`, numbered from `01`, never a single combined tickets file
-- Triage state is recorded as a `Status:` line near the top of each issue file (see `triage-labels.md` for the role strings)
+- Triage state is recorded as a `Status:` line near the top of each issue file (see `triage-labels.md` for the role strings). An issue becomes `resolved` in the PR that does its work, as that PR's last commit, so no follow-up PR is needed
 - Comments and conversation history append to the bottom of the file under a `## Comments` heading
 
 ## When a skill says "publish to the issue tracker"

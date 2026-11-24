@@ -40,6 +40,12 @@ repos:
         language: system
         files: ^(docs/specs/|docs/agents/triage-labels\.md$|scripts/check_specs\.py$)
         pass_filenames: false
+      - id: test-pdf-reads
+        name: tests read PDF text through the helpers
+        entry: scripts/check_test_pdf_reads.sh
+        language: system
+        files: ^(tests/.*\.py|scripts/check_test_pdf_reads\.sh)$
+        pass_filenames: false
       # Secret and log files must stay ignored.
       - id: gitignore-guards
         name: .gitignore keeps secrets ignored
