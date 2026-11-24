@@ -1,6 +1,6 @@
 # 01: Markdown Source to PDF, core rendering
 
-Status: ready-for-agent
+Status: resolved
 
 ## Problem
 
