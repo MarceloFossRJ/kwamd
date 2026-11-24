@@ -1,4 +1,4 @@
-"""Conversion of a Source into Markdown text.
+"""Conversion of a PDF Source into Markdown text.
 
 This is the only module that knows about PyMuPDF4LLM, so the converter can be
 swapped or augmented (e.g. with OCR) without touching the CLI.
