@@ -1,6 +1,6 @@
 # 01: Add the sign-off rule to the coding standards
 
-Status: ready-for-agent
+Status: resolved
 
 ## Problem
 
