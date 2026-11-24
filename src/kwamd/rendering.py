@@ -5,6 +5,7 @@ This is the only module that knows about markdown-it-py and PyMuPDF's Story
 """
 
 import re
+from dataclasses import dataclass
 from itertools import pairwise
 from pathlib import Path
 from urllib.parse import unquote
@@ -35,33 +36,165 @@ th, td { border: 0.5pt solid #888888; padding: 3pt 6pt; }
 blockquote { border-left: 3pt solid #bbbbbb; padding-left: 8pt; margin-left: 0; }
 """
 
+
+class _Markdown(MarkdownIt):
+    """markdown-it, letting every link and image address through.
+
+    markdown-it would leave a ``file:``, ``data:`` or ``javascript:`` address
+    as raw Markdown text. kwamd vets every address itself instead: see
+    ``_vet_links`` and ``_collect_images``.
+    """
+
+    def validateLink(self, url: str) -> bool:
+        return True
+
+
 # Raw HTML is shown as text: Story supports only part of HTML (ADR 0002).
-MARKDOWN = MarkdownIt("commonmark", {"html": False}).enable(["table", "strikethrough"])
+MARKDOWN = _Markdown("commonmark", {"html": False}).enable(["table", "strikethrough"])
 
 
-def render_pdf(markdown: str, source_path: Path) -> bytes:
-    """Return a PDF of the Markdown Source text ``markdown``.
+@dataclass
+class Rendering:
+    """A rendered PDF, and the warnings to show the person about it."""
 
-    Relative resources, such as images, are read from the Source's folder.
+    pdf: bytes
+    warnings: list[str]
+
+
+_REMOTE_ADDRESS = re.compile(r"(https?:)?//", re.IGNORECASE)
+_LINK_ADDRESS = re.compile(r"(https?:|mailto:)", re.IGNORECASE)
+"""Links that stay clickable, besides ``#heading`` links. Anything else, such
+as ``file:`` (which would make the PDF open a file) or ``javascript:``,
+renders as plain text."""
+_ADDRESS_SCHEME = re.compile(r"([a-z][a-z0-9+.-]+):", re.IGNORECASE)
+"""An address scheme such as ``file:``; two letters at least, so ``C:`` isn't one."""
+
+
+class _UnusableImage(Exception):
+    """A local image that can't be embedded."""
+
+    def __init__(self, reason: str, where: str) -> None:
+        super().__init__(f"{reason}, showing alt text instead: {where}")
+
+
+def render_pdf(markdown: str, source_path: Path) -> Rendering:
+    """Render the Markdown Source text ``markdown`` as a PDF.
+
+    Relative image paths are read against the Source's folder. An image that
+    can't be embedded never fails the run: it shows its alt text, and the
+    returned ``Rendering.warnings`` say why.
     """
     quiet_mupdf()
     try:
-        return _layout(_html(markdown), source_path.parent)
+        html, images, warnings = _html(markdown, source_path.parent)
+        return Rendering(_layout(html, images), warnings)
     except Exception as error:
         # Neither markdown-it-py nor Story documents its exception types, so
         # any failure is reported as the Source's.
         raise KwamdError(f"Cannot render Source {source_path}: {one_line(error)}") from None
 
 
-def _html(markdown: str) -> str:
+def _html(markdown: str, folder: Path) -> tuple[str, dict[str, bytes], list[str]]:
+    """The HTML for ``markdown``, the image files it refers to, and warnings."""
     tokens = MARKDOWN.parse(markdown)
-    _resolve_anchor_links(tokens, _add_heading_ids(tokens))
+    _vet_links(tokens, _add_heading_ids(tokens))
+    images, warnings = _collect_images(tokens, folder)
     html: str = MARKDOWN.renderer.render(tokens, MARKDOWN.options, {})
-    return html
+    return html, images, warnings
 
 
-def _layout(html: str, folder: Path) -> bytes:
-    story = pymupdf.Story(html, user_css=STYLE, archive=pymupdf.Archive(str(folder)))
+def _collect_images(tokens: list[Token], folder: Path) -> tuple[dict[str, bytes], list[str]]:
+    """Read each local image and point its ``src`` at a name in the archive.
+
+    Paths are read against ``folder``; ``../`` and absolute paths are allowed,
+    which Story's own archive of the folder couldn't reach. An image that is
+    remote (never downloaded) or unusable is replaced by its alt text, with a
+    warning. Returns the image content by name, and the warnings.
+    """
+    images: dict[str, bytes] = {}
+    warnings: list[str] = []
+    remote = 0
+    for children, index, image in _images_in(tokens):
+        src = str(image.attrGet("src"))
+        try:
+            if _REMOTE_ADDRESS.match(src):
+                remote += 1
+            else:
+                content = _local_image(src, folder)
+                name = f"image-{len(images)}{Path(src).suffix}"
+                images[name] = content
+                image.attrSet("src", name)
+                continue
+        except _UnusableImage as unusable:
+            warnings.append(one_line(unusable))
+        children[index] = Token("text", "", 0, content=image.content)  # its alt text
+    if remote:
+        warnings.append(
+            f"remote images are not downloaded; showing alt text instead: {remote} image(s)"
+        )
+    return images, warnings
+
+
+def _images_in(tokens: list[Token]) -> list[tuple[list[Token], int, Token]]:
+    """Each image token, with the list holding it and its index there, so it
+    can be replaced."""
+    return [
+        (children, index, child)
+        for token in tokens
+        for children in [token.children or []]
+        for index, child in enumerate(children)
+        if child.type == "image"
+    ]
+
+
+def _local_image(src: str, folder: Path) -> bytes:
+    """The content of the image at ``src``, read against ``folder``, or
+    ``_UnusableImage`` saying why it can't be embedded."""
+    if scheme := _ADDRESS_SCHEME.match(src):
+        raise _UnusableImage("unsupported image address", f"{scheme.group(1)}:…")
+    path = folder / unquote(src)
+    if not path.exists():
+        raise _UnusableImage("image not found", str(path))
+    try:
+        content = path.read_bytes()
+    except IsADirectoryError:
+        raise _UnusableImage("not a usable image", str(path)) from None
+    except OSError as error:
+        reason = f"cannot read image ({error.strerror or error})"
+        raise _UnusableImage(reason, str(path)) from None
+    if not _decodes_cleanly(content, path.suffix.lower() == ".svg"):
+        raise _UnusableImage("not a usable image", str(path))
+    return content
+
+
+def _decodes_cleanly(content: bytes, svg: bool) -> bool:
+    """Whether MuPDF decodes ``content`` as an image without complaint.
+
+    MuPDF decodes some cut-off images with only a warning, padding the rest,
+    so its warning log is cleared first and checked after. Nothing else
+    decodes in between, because kwamd does one thing at a time.
+    """
+    pymupdf.TOOLS.mupdf_warnings(reset=True)
+    try:
+        if svg:
+            pymupdf.open(stream=content, filetype="svg").close()
+        else:
+            pymupdf.Pixmap(content)
+    except Exception:
+        # PyMuPDF documents no exception type for an unknown or broken image.
+        return False
+    return not pymupdf.TOOLS.mupdf_warnings(reset=True)
+
+
+def _inline_children(tokens: list[Token]) -> list[Token]:
+    return [child for token in tokens for child in token.children or []]
+
+
+def _layout(html: str, images: dict[str, bytes]) -> bytes:
+    archive = pymupdf.Archive()
+    for name, content in images.items():
+        archive.add((content, name))
+    story = pymupdf.Story(html, user_css=STYLE, archive=archive)
     document = story.write_with_links(lambda _n, _filled: (PAGE, CONTENT, None))
     try:
         pdf: bytes = document.tobytes()
@@ -91,24 +224,24 @@ def _add_heading_ids(tokens: list[Token]) -> set[str]:
     return ids
 
 
-def _resolve_anchor_links(tokens: list[Token], ids: set[str]) -> None:
-    """Point each ``#…`` link at its heading id, matched the way GitHub does.
+def _vet_links(tokens: list[Token], ids: set[str]) -> None:
+    """Keep a link clickable only when it goes to a web or mail address, or to
+    a heading; any other link renders as plain text.
 
-    markdown-it percent-encodes link targets (``#café`` arrives as
-    ``#caf%C3%A9``) and GitHub ignores case, so both are undone before
-    matching. A link to a heading that doesn't exist becomes plain text,
-    because Story raises on a link whose target id is missing.
+    A ``#…`` link matches its heading the way GitHub does: markdown-it
+    percent-encodes it (``#café`` arrives as ``#caf%C3%A9``) and GitHub
+    ignores case, so both are undone first. A link to a heading that doesn't
+    exist becomes plain text too, because Story raises on a link whose target
+    id is missing.
     """
-    for token in tokens:
-        for child in token.children or []:
-            href = child.attrGet("href")
-            if child.type != "link_open" or not isinstance(href, str) or not href.startswith("#"):
-                continue
-            wanted = unquote(href[1:]).lower()
-            if wanted in ids:
-                child.attrSet("href", f"#{wanted}")
-            else:
-                del child.attrs["href"]
+    for child in _inline_children(tokens):
+        href = child.attrGet("href")
+        if child.type != "link_open" or not isinstance(href, str):
+            continue
+        if href.startswith("#") and (wanted := unquote(href[1:]).lower()) in ids:
+            child.attrSet("href", f"#{wanted}")
+        elif href.startswith("#") or not _LINK_ADDRESS.match(href):
+            del child.attrs["href"]
 
 
 def _slug(heading: str) -> str:

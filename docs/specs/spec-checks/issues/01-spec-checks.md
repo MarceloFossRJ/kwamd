@@ -1,6 +1,6 @@
 # 01: Add spec and .gitignore checks
 
-Status: ready-for-agent
+Status: resolved
 
 ## Problem
 

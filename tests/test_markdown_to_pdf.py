@@ -1,6 +1,8 @@
 """Behaviour of ``kwamd`` for a Markdown Source, tested through ``main(argv)``."""
 
+import os
 import unicodedata
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -445,3 +447,215 @@ def test_repeated_headings_get_distinct_ids_like_github(workdir: Path) -> None:
         "b": _page_of(target, "Second."),
         "c": _page_of(target, "Third."),
     }
+
+
+def _write_png(path: Path) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    pixmap = pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, 40, 20), False)
+    pixmap.clear_with(120)
+    pixmap.save(str(path))
+    return path
+
+
+def _image_count(path: Path) -> int:
+    with pymupdf.open(path) as doc:
+        return sum(len(page.get_images()) for page in doc)
+
+
+@pytest.mark.parametrize("image", ["chart.png", "img/chart.png", "../shared/chart.png"])
+def test_local_image_is_embedded(
+    workdir: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str], image: str
+) -> None:
+    folder = tmp_path / "notes-folder"
+    _write_png(folder / image)
+    source = folder / "notes.md"
+    source.write_text(f"Before.\n\n![A chart]({image})\n\nAfter.\n", encoding="utf-8")
+
+    assert main([str(source)]) == 0
+
+    target = workdir / "notes.pdf"
+    assert _image_count(target) == 1
+    assert "A chart" not in pdf_text(target)
+    assert stderr_lines(capsys.readouterr().err, workdir.parent) == []
+
+
+def test_remote_images_show_alt_text_with_one_warning(
+    workdir: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    source = workdir / "notes.md"
+    source.write_text(
+        "![Team photo](https://example.org/team.png)\n\n![Logo](http://example.org/logo.png)\n",
+        encoding="utf-8",
+    )
+
+    exit_code = main([str(source)])
+
+    target = workdir / "notes.pdf"
+    assert exit_code == 0
+    captured = capsys.readouterr()
+    assert captured.out == f"{target}\n"
+    assert stderr_lines(captured.err, workdir.parent) == [
+        "kwamd: warning: remote images are not downloaded; showing alt text instead: 2 image(s)"
+    ]
+    text = pdf_text(target)
+    assert "Team photo" in text
+    assert "Logo" in text
+    assert _image_count(target) == 0
+
+
+@pytest.mark.parametrize(
+    ("setup", "reason"),
+    [
+        (lambda path: None, "image not found"),
+        (lambda path: path.write_text("not an image"), "not a usable image"),
+        (lambda path: path.mkdir(), "not a usable image"),
+    ],
+    ids=["missing", "not-an-image", "folder"],
+)
+def test_unusable_local_image_shows_alt_text_with_a_warning(
+    workdir: Path,
+    capsys: pytest.CaptureFixture[str],
+    setup: Callable[[Path], object],
+    reason: str,
+) -> None:
+    setup(workdir / "chart.png")
+    source = workdir / "notes.md"
+    source.write_text("![Sales chart](chart.png)\n", encoding="utf-8")
+
+    exit_code = main([str(source)])
+
+    target = workdir / "notes.pdf"
+    assert exit_code == 0
+    captured = capsys.readouterr()
+    assert captured.out == f"{target}\n"
+    assert stderr_lines(captured.err, workdir.parent) == [
+        f"kwamd: warning: {reason}, showing alt text instead: <tmp>/cwd/chart.png"
+    ]
+    assert "Sales chart" in pdf_text(target)
+    assert _image_count(target) == 0
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root can read a file with no permissions")
+def test_unreadable_local_image_shows_alt_text_with_a_warning(
+    workdir: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    image = _write_png(workdir / "chart.png")
+    image.chmod(0)
+    source = workdir / "notes.md"
+    source.write_text("![Sales chart](chart.png)\n", encoding="utf-8")
+    try:
+        exit_code = main([str(source)])
+    finally:
+        image.chmod(0o644)
+
+    assert exit_code == 0
+    [line] = stderr_lines(capsys.readouterr().err, workdir.parent)
+    assert line.startswith("kwamd: warning: cannot read image (")
+    assert line.endswith("), showing alt text instead: <tmp>/cwd/chart.png")
+    assert "Sales chart" in pdf_text(workdir / "notes.pdf")
+
+
+def test_svg_image_is_embedded(workdir: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    (workdir / "logo.svg").write_text(
+        '<svg xmlns="http://www.w3.org/2000/svg" width="40" height="20">'
+        '<rect width="40" height="20" fill="red"/></svg>',
+        encoding="utf-8",
+    )
+    source = workdir / "notes.md"
+    source.write_text("![Logo](logo.svg)\n", encoding="utf-8")
+
+    assert main([str(source)]) == 0
+
+    assert _image_count(workdir / "notes.pdf") == 1
+    assert stderr_lines(capsys.readouterr().err, workdir.parent) == []
+
+
+@pytest.mark.parametrize("keep", [0.5, 0.99, 60], ids=["half", "almost-all", "header-only"])
+def test_cut_off_image_shows_alt_text_with_a_warning(
+    workdir: Path, capsys: pytest.CaptureFixture[str], keep: float
+) -> None:
+    image = workdir / "chart.png"
+    pixmap = pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, 400, 300), False)
+    pixmap.set_rect(pymupdf.IRect(0, 0, 200, 300), (200, 30, 30))
+    content = pixmap.tobytes("png")
+    image.write_bytes(content[: int(keep * len(content)) if keep < 1 else int(keep)])
+    source = workdir / "notes.md"
+    source.write_text("![Sales chart](chart.png)\n", encoding="utf-8")
+
+    assert main([str(source)]) == 0
+
+    assert stderr_lines(capsys.readouterr().err, workdir.parent) == [
+        "kwamd: warning: not a usable image, showing alt text instead: <tmp>/cwd/chart.png"
+    ]
+    assert _image_count(workdir / "notes.pdf") == 0
+
+
+@pytest.mark.parametrize(
+    "address", ["HTTPS://example.org/a.png", "Http://example.org/b.png", "//example.org/c.png"]
+)
+def test_remote_image_addresses_match_any_case_and_scheme_relative(
+    workdir: Path, capsys: pytest.CaptureFixture[str], address: str
+) -> None:
+    source = workdir / "notes.md"
+    source.write_text(f"![Photo]({address})\n", encoding="utf-8")
+
+    assert main([str(source)]) == 0
+
+    assert stderr_lines(capsys.readouterr().err, workdir.parent) == [
+        "kwamd: warning: remote images are not downloaded; showing alt text instead: 1 image(s)"
+    ]
+    assert "Photo" in pdf_text(workdir / "notes.pdf")
+
+
+@pytest.mark.parametrize(
+    "address",
+    ["file:///etc/hosts", "data:image/png;base64,iVBORw0KGgo=", "javascript:alert(1)"],
+    ids=["file", "data", "javascript"],
+)
+def test_unsupported_image_address_shows_alt_text_with_a_warning(
+    workdir: Path, capsys: pytest.CaptureFixture[str], address: str
+) -> None:
+    source = workdir / "notes.md"
+    source.write_text(f"![Diagram]({address})\n", encoding="utf-8")
+
+    assert main([str(source)]) == 0
+
+    scheme = address.split(":")[0]
+    assert stderr_lines(capsys.readouterr().err, workdir.parent) == [
+        f"kwamd: warning: unsupported image address, showing alt text instead: {scheme}:…"
+    ]
+    text = pdf_text(workdir / "notes.pdf")
+    assert "Diagram" in text
+    assert "](" not in text
+
+
+@pytest.mark.parametrize(
+    "address", ["file:///etc/hosts", "other.md", "data:text/html,hi", "javascript:alert(1)"]
+)
+def test_link_to_a_local_or_script_address_renders_as_plain_text(
+    workdir: Path, address: str
+) -> None:
+    source = workdir / "notes.md"
+    source.write_text(
+        f"Open [the file]({address}) or [the site](https://example.org).\n", encoding="utf-8"
+    )
+
+    assert main([str(source)]) == 0
+
+    text = pdf_text(workdir / "notes.pdf")
+    assert "the file" in text
+    assert "](" not in text
+    with pymupdf.open(workdir / "notes.pdf") as doc:
+        assert {link.get("uri") for link in doc[0].get_links()} == {"https://example.org"}
+
+
+def test_image_path_with_a_line_break_gives_a_one_line_warning(
+    workdir: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    source = workdir / "notes.md"
+    source.write_text("![Chart](a%0Ab.png)\n", encoding="utf-8")
+
+    assert main([str(source)]) == 0
+
+    [line] = stderr_lines(capsys.readouterr().err, workdir.parent)
+    assert line == "kwamd: warning: image not found, showing alt text instead: <tmp>/cwd/a b.png"
